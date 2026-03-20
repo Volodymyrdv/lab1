@@ -2,33 +2,13 @@
 
 import { useState } from 'react';
 import styles from './page.module.css';
-
-const movies = [
-  'The Shawshank Redemption',
-  'The Godfather',
-  'The Dark Knight',
-  'Pulp Fiction',
-  'Forrest Gump',
-  'Inception',
-  'Скажене весілля',
-  'The Matrix',
-  'Goodfellas',
-  'The Lord of the Rings: The Fellowship of the Ring',
-  'Star Wars: Episode V - The Empire Strikes Back',
-  'The Silence of the Lambs',
-  "Schindler's List",
-  'Titanic',
-  'Gladiator',
-  'The Avengers',
-  'Interstellar',
-  'Parasite',
-  'Joker',
-  'Avengers: Endgame'
-];
+import { movies } from '@/lib/movies';
 
 const medals = ['🥇', '🥈', '🥉'];
+const createExpertId = () => `expert-${Date.now()}`;
 
 export default function Home() {
+  const [expert, setExpert] = useState(createExpertId);
   const [selectedMovies, setSelectedMovies] = useState<string[]>([]);
   const [message, setMessage] = useState('');
 
@@ -46,6 +26,10 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!expert.trim()) {
+      setMessage('Please enter the expert name.');
+      return;
+    }
     if (selectedMovies.length !== 3) {
       setMessage('Please select exactly 3 movies.');
       return;
@@ -53,14 +37,16 @@ export default function Home() {
     const res = await fetch('/api/vote', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ selectedMovies })
+      body: JSON.stringify({ expert, selectedMovies })
     });
     if (res.ok) {
       setMessage('Vote submitted successfully!');
+      setExpert(createExpertId());
       setSelectedMovies([]);
       setTimeout(() => setMessage(''), 3000);
     } else {
-      setMessage('Error submitting vote.');
+      const data = await res.json().catch(() => null);
+      setMessage(data?.error ?? 'Error submitting vote.');
     }
   };
 
@@ -68,6 +54,20 @@ export default function Home() {
     <div className={styles.page}>
       <div className={styles.container}>
         <h1 className={styles.pageTitle}>Vote for Top 20 Movies</h1>
+
+        <div className={styles.form}>
+          <div className={styles.inputGroup}>
+            <label htmlFor='expert'>Expert</label>
+            <input
+              id='expert'
+              type='text'
+              value={expert}
+              onChange={(e) => setExpert(e.target.value)}
+              placeholder='Наприклад: expert-1740000000000'
+              className={styles.input}
+            />
+          </div>
+        </div>
 
         <div className={styles.content}>
           {/* Left column - Select movies */}

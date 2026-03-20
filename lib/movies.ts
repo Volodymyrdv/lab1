@@ -1,0 +1,22 @@
+export const movies = [
+  'The Shawshank Redemption',
+  'The Godfather',
+  'The Dark Knight',
+  'Pulp Fiction',
+  'Forrest Gump',
+  'Inception',
+  'Скажене весілля',
+  'The Matrix',
+  'Goodfellas',
+  'The Lord of the Rings: The Fellowship of the Ring',
+  'Star Wars: Episode V - The Empire Strikes Back',
+  'The Silence of the Lambs',
+  "Schindler's List",
+  'Titanic',
+  'Gladiator',
+  'The Avengers',
+  'Interstellar',
+  'Parasite',
+  'Joker',
+  'Avengers: Endgame'
+] as const;

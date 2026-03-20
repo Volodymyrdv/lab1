@@ -1,8 +1,8 @@
 # Movie Voting App (Next.js + Supabase)
 
-This small Next.js project lets users vote for their top 3 movies from a list of 20. Votes
-are stored in a Supabase (Postgres) table instead of a local JSON file, making it suitable
-for development and deployment.
+This small Next.js project lets users vote for their top 3 movies from a list of 20. Each
+submission is stored as a separate Supabase row with the expert name plus first, second,
+and third place selections.
 
 ---
 
@@ -31,22 +31,18 @@ for development and deployment.
 
    ```sql
    create table votes (
-     movie text primary key,
-     count bigint not null default 0
+     id bigint generated always as identity primary key,
+     expert text not null,
+     first_place text not null,
+     second_place text not null,
+     third_place text not null,
+     created_at timestamptz not null default now()
    );
    ```
 
    Alternatively use the table editor UI.
 
-5. (Optional) **Migrate existing data** from `data/votes.json` if present:
-
-   ```bash
-   npm run migrate
-   ```
-
-   The script reads the JSON file and upserts each movie/count into Supabase.
-
-6. **Start the development server**:
+5. **Start the development server**:
    ```bash
    npm run dev
    ```
@@ -62,24 +58,19 @@ for development and deployment.
   - `SUPABASE_URL`
   - `SUPABASE_ANON_KEY`
 - Build command is `npm run build` (handled automatically).
-- You can optionally run `npm run migrate` in a one‑off deployment if you need to
-  populate the database with existing votes before going live.
-
 > 🔐 **Security note:** Never commit your `SUPABASE_ANON_KEY` or `.env.local` to git.
 
 ---
 
 ## 🧱 Code structure highlights
 
-- `app/api/vote/route.ts` – API route that reads/writes the `votes` table via
-  `lib/supabase.ts`.
+- `app/api/vote/route.ts` – API route that stores each expert vote as one row in the
+  `votes` table via `lib/supabase.ts`.
 - `lib/supabase.ts` – Supabase client helper using `SUPABASE_URL` and
   `SUPABASE_ANON_KEY`.
-- `app/page.tsx` – front‑end for selecting movies and submitting votes.
-- `app/admin/page.tsx` – simple admin panel showing live counts (no auth). It
-  still calls the same `/api/vote` endpoints.
-- `scripts/migrate.ts` – helper to migrate existing JSON data (run with
-  `npm run migrate`).
+- `app/page.tsx` – front‑end for entering an expert name, selecting movies, and
+  submitting votes.
+- `app/admin/page.tsx` – simple admin panel showing submitted expert rows.
 
 ---
 

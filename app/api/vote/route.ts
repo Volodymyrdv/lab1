@@ -1,65 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
-// utility type for vote rows
 interface VoteRow {
-  movie: string;
-  count: number;
+  id: number;
+  expert: string;
+  first_place: string;
+  second_place: string;
+  third_place: string;
+  created_at: string;
 }
 
 export async function POST(request: NextRequest) {
-  const { selectedMovies } = (await request.json()) as { selectedMovies: string[] };
+  const { expert, selectedMovies } = (await request.json()) as {
+    expert: string;
+    selectedMovies: string[];
+  };
+
+  const normalizedExpert = expert?.trim();
+
+  if (!normalizedExpert) {
+    return NextResponse.json({ error: 'Expert name is required' }, { status: 400 });
+  }
 
   if (!selectedMovies || selectedMovies.length !== 3) {
     return NextResponse.json({ error: 'Please select exactly 3 movies' }, { status: 400 });
   }
 
-  // update each selected movie in series (avoid complex builder types)
-  for (const movie of selectedMovies) {
-    // try to read existing count
-    const { data, error } = await supabase
-      .from('votes')
-      .select('count')
-      .eq('movie', movie)
-      .single();
+  const uniqueMovies = new Set(selectedMovies);
+  if (uniqueMovies.size !== 3) {
+    return NextResponse.json({ error: 'Movies must be unique' }, { status: 400 });
+  }
 
-    if (error && error.code !== 'PGRST116') {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+  const { error } = await supabase.from('votes').insert({
+    expert: normalizedExpert,
+    first_place: selectedMovies[0],
+    second_place: selectedMovies[1],
+    third_place: selectedMovies[2]
+  });
 
-    if (data) {
-      // existing row – increment
-      const { error: updateErr } = await supabase
-        .from('votes')
-        .update({ count: (data as any).count + 1 })
-        .eq('movie', movie);
-      if (updateErr) {
-        return NextResponse.json({ error: updateErr.message }, { status: 500 });
-      }
-    } else {
-      // no row yet – insert first vote
-      const { error: insertErr } = await supabase.from('votes').insert({ movie, count: 1 });
-      if (insertErr) {
-        return NextResponse.json({ error: insertErr.message }, { status: 500 });
-      }
-    }
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   return NextResponse.json({ success: true });
 }
 
 export async function GET() {
-  const { data, error } = await supabase.from('votes').select('movie,count');
+  const { data, error } = await supabase
+    .from('votes')
+    .select('id, expert, first_place, second_place, third_place, created_at')
+    .order('created_at', { ascending: false });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const votes: Record<string, number> = {};
-  const rows = (data ?? []) as VoteRow[];
-  rows.forEach((row) => {
-    votes[row.movie] = row.count;
-  });
-
-  return NextResponse.json(votes);
+  return NextResponse.json((data ?? []) as VoteRow[]);
 }
