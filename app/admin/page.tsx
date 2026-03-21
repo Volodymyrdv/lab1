@@ -5,7 +5,6 @@ import baseStyles from '../page.module.css';
 import styles from './admin.module.css';
 import { movies } from '@/lib/movies';
 import { getHeuristicByValue, heuristics } from '@/lib/heuristics';
-import popularObjects from '@/data/lab1-popular-objects.json';
 
 interface VoteRow {
   id: number;
@@ -166,7 +165,11 @@ export default function Admin() {
     .sort((a, b) => b.points - a.points || a.code.localeCompare(b.code));
 
   const topHeuristics = heuristicRankingRows.filter((row) => row.points > 0).slice(0, 3);
-  const baseSubset = structureRows.filter((row) => popularObjects.includes(row.movie));
+  const baseSubset = ratingRows
+    .filter((row) => row.points > 0)
+    .slice(0, 10)
+    .map((row) => structureRows.find((item) => item.movie === row.movie))
+    .filter((row): row is StructureRow => Boolean(row));
 
   const matchesHeuristic = (row: StructureRow, code: string) => {
     switch (code) {
@@ -444,6 +447,10 @@ export default function Admin() {
                 {topHeuristics.length > 0
                   ? topHeuristics.map((heuristic) => heuristic.code).join(', ')
                   : 'ще не визначені'}
+              </p>
+              <p className={styles.sectionText}>
+                Базова підмножина автоматично формується з таблиці рейтингу ЛР1: беруться перші 10
+                об&apos;єктів із ненульовим балом.
               </p>
               <div className={styles.tableWrap}>
                 <table className={styles.table}>
