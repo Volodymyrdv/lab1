@@ -89,12 +89,14 @@ export default function Lab2Page() {
             <div className={styles.moviesList}>
               {heuristics.map((heuristic, index) => (
                 <div
-                  key={heuristic}
-                  className={`${styles.movieItem} ${selectedHeuristics.includes(heuristic) ? styles.movieItemSelected : ''}`}
-                  onClick={() => handleHeuristicClick(heuristic)}
+                  key={heuristic.code}
+                  className={`${styles.movieItem} ${selectedHeuristics.includes(heuristic.value) ? styles.movieItemSelected : ''}`}
+                  onClick={() => handleHeuristicClick(heuristic.value)}
                 >
                   <span className={styles.movieItemNumber}>{index + 1}</span>
-                  <span className={styles.movieItemLabel}>{heuristic}</span>
+                  <span className={styles.movieItemLabel}>
+                    <strong>{heuristic.code}</strong> {heuristic.description}
+                  </span>
                 </div>
               ))}
             </div>
