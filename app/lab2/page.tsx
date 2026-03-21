@@ -2,52 +2,56 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import styles from './page.module.css';
-import { movies } from '@/lib/movies';
+import styles from '../page.module.css';
+import { heuristics } from '@/lib/heuristics';
 
 const medals = ['🥇', '🥈', '🥉'];
 const createExpertId = () => `expert-${Date.now()}`;
 
-export default function Home() {
+export default function Lab2Page() {
   const [expert, setExpert] = useState(createExpertId);
-  const [selectedMovies, setSelectedMovies] = useState<string[]>([]);
+  const [selectedHeuristics, setSelectedHeuristics] = useState<string[]>([]);
   const [message, setMessage] = useState('');
 
-  const handleMovieClick = (movie: string) => {
-    if (selectedMovies.includes(movie)) {
-      setSelectedMovies(selectedMovies.filter((m) => m !== movie));
-    } else if (selectedMovies.length < 3) {
-      setSelectedMovies([...selectedMovies, movie]);
+  const handleHeuristicClick = (heuristic: string) => {
+    if (selectedHeuristics.includes(heuristic)) {
+      setSelectedHeuristics(selectedHeuristics.filter((item) => item !== heuristic));
+    } else if (selectedHeuristics.length < 3) {
+      setSelectedHeuristics([...selectedHeuristics, heuristic]);
     }
   };
 
-  const handleRemoveMovie = (index: number) => {
-    setSelectedMovies(selectedMovies.filter((_, i) => i !== index));
+  const handleRemoveHeuristic = (index: number) => {
+    setSelectedHeuristics(selectedHeuristics.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!expert.trim()) {
       setMessage('Please enter the expert name.');
       return;
     }
-    if (selectedMovies.length !== 3) {
-      setMessage('Please select exactly 3 movies.');
+
+    if (selectedHeuristics.length !== 3) {
+      setMessage('Please select exactly 3 heuristics.');
       return;
     }
-    const res = await fetch('/api/vote', {
+
+    const res = await fetch('/api/lab2-vote', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expert, selectedMovies })
+      body: JSON.stringify({ expert, selectedHeuristics })
     });
+
     if (res.ok) {
-      setMessage('Vote submitted successfully!');
+      setMessage('Heuristics submitted successfully!');
       setExpert(createExpertId());
-      setSelectedMovies([]);
+      setSelectedHeuristics([]);
       setTimeout(() => setMessage(''), 3000);
     } else {
       const data = await res.json().catch(() => null);
-      setMessage(data?.error ?? 'Error submitting vote.');
+      setMessage(data?.error ?? 'Error submitting heuristics.');
     }
   };
 
@@ -55,15 +59,15 @@ export default function Home() {
     <div className={styles.page}>
       <div className={styles.container}>
         <div className={styles.topNav}>
-          <Link href='/' className={`${styles.topNavLink} ${styles.topNavLinkActive}`}>
+          <Link href='/' className={styles.topNavLink}>
             Лаб1
           </Link>
-          <Link href='/lab2' className={styles.topNavLink}>
+          <Link href='/lab2' className={`${styles.topNavLink} ${styles.topNavLinkActive}`}>
             Лаб2
           </Link>
         </div>
 
-        <h1 className={styles.pageTitle}>Vote for Top 20 Movies</h1>
+        <h1 className={styles.pageTitle}>Lab 2 - Heuristic Selection</h1>
 
         <div className={styles.form}>
           <div className={styles.inputGroup}>
@@ -80,52 +84,50 @@ export default function Home() {
         </div>
 
         <div className={styles.content}>
-          {/* Left column - Select movies */}
           <div className={styles.column}>
-            <h2 className={styles.columnTitle}>Select Your Top 3</h2>
+            <h2 className={styles.columnTitle}>Оберіть 3 евристики</h2>
             <div className={styles.moviesList}>
-              {movies.map((movie, index) => (
+              {heuristics.map((heuristic, index) => (
                 <div
-                  key={movie}
-                  className={`${styles.movieItem} ${selectedMovies.includes(movie) ? styles.movieItemSelected : ''}`}
-                  onClick={() => handleMovieClick(movie)}
+                  key={heuristic}
+                  className={`${styles.movieItem} ${selectedHeuristics.includes(heuristic) ? styles.movieItemSelected : ''}`}
+                  onClick={() => handleHeuristicClick(heuristic)}
                 >
                   <span className={styles.movieItemNumber}>{index + 1}</span>
-                  <span className={styles.movieItemLabel}>{movie}</span>
+                  <span className={styles.movieItemLabel}>{heuristic}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Right column - Selected movies */}
           <div className={styles.column}>
-            <h2 className={styles.columnTitle}>Your Selection</h2>
+            <h2 className={styles.columnTitle}>Ваш вибір</h2>
             <div className={styles.selectedMovies}>
-              {selectedMovies.length === 0 ? (
+              {selectedHeuristics.length === 0 ? (
                 <div className={styles.emptyState}>
-                  <p>Click on movies to select your top 3</p>
+                  <p>Натисніть на евристики, щоб обрати топ 3</p>
                 </div>
               ) : (
                 <>
-                  {selectedMovies.map((movie, index) => (
-                    <div key={index} className={styles.selectedMovie}>
+                  {selectedHeuristics.map((heuristic, index) => (
+                    <div key={heuristic} className={styles.selectedMovie}>
                       <span className={styles.selectedMovieRank}>{medals[index]}</span>
-                      <span className={styles.selectedMovieName}>{movie}</span>
+                      <span className={styles.selectedMovieName}>{heuristic}</span>
                       <button
                         className={styles.selectedMovieRemove}
-                        onClick={() => handleRemoveMovie(index)}
+                        onClick={() => handleRemoveHeuristic(index)}
                       >
                         ✕
                       </button>
                     </div>
                   ))}
-                  {selectedMovies.length === 3 && (
+                  {selectedHeuristics.length === 3 && (
                     <button
                       className={styles.button}
                       onClick={handleSubmit}
                       style={{ marginTop: '20px' }}
                     >
-                      Confirm Vote
+                      Confirm Heuristics
                     </button>
                   )}
                 </>
