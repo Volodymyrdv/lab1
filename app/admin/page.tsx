@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import baseStyles from '../page.module.css';
 import styles from './admin.module.css';
 import { movies } from '@/lib/movies';
@@ -50,6 +50,25 @@ interface HeuristicStepRow {
   removedCount: number;
 }
 
+interface Lab2FilterRow extends StructureRow {
+  rank: number;
+  ratingPoints: number;
+  matchedHeuristics: string[];
+  removedBy: string | null;
+  isIncluded: boolean;
+}
+
+interface Lab3ExpertRow {
+  expert: string;
+  choices: string[];
+}
+
+interface PermutationResult {
+  ranking: string[];
+  sumDistance: number;
+  maxDistance: number;
+}
+
 const lab1ScoreMap = {
   first_place: 3,
   second_place: 2,
@@ -64,13 +83,72 @@ const lab2ScoreMap = {
 
 const getHeuristicCode = (value: string) => getHeuristicByValue(value)?.code ?? value;
 
+const matchesHeuristic = (row: StructureRow, code: string) => {
+  switch (code) {
+    case 'E1':
+      return row.thirdPlace === 1;
+    case 'E2':
+      return row.secondPlace === 1;
+    case 'E3':
+      return row.firstPlace === 1;
+    case 'E4':
+      return row.thirdPlace === 2;
+    case 'E5':
+      return row.thirdPlace === 1 && row.secondPlace === 1;
+    case 'E6':
+      return row.firstPlace === 0;
+    case 'E7':
+      return row.totalVotes === 1;
+    default:
+      return false;
+  }
+};
+
+function MatrixTable({
+  title,
+  candidates,
+  matrix
+}: {
+  title: string;
+  candidates: string[];
+  matrix: number[][];
+}) {
+  return (
+    <section className={styles.section}>
+      <h2 className={styles.sectionTitle}>{title}</h2>
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>Об&apos;єкт</th>
+              {candidates.map((candidate) => (
+                <th key={candidate}>{candidate}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {candidates.map((candidate, rowIndex) => (
+              <tr key={candidate}>
+                <td>{candidate}</td>
+                {matrix[rowIndex].map((value, columnIndex) => (
+                  <td key={`${candidate}-${candidates[columnIndex]}`}>{value}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 export default function Admin() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [votes, setVotes] = useState<VoteRow[]>([]);
   const [lab2Votes, setLab2Votes] = useState<Lab2VoteRow[]>([]);
-  const [activeLab, setActiveLab] = useState<'lab1' | 'lab2'>('lab1');
+  const [activeLab, setActiveLab] = useState<'lab1' | 'lab2' | 'lab3'>('lab1');
   const [message, setMessage] = useState('');
 
   useEffect(() => {
@@ -106,111 +184,264 @@ export default function Admin() {
     }
   };
 
-  const ratingRows: RatingRow[] = movies
-    .map((movie) => {
-      const points = votes.reduce((total, vote) => {
-        if (vote.first_place === movie) {
-          return total + lab1ScoreMap.first_place;
-        }
-        if (vote.second_place === movie) {
-          return total + lab1ScoreMap.second_place;
-        }
-        if (vote.third_place === movie) {
-          return total + lab1ScoreMap.third_place;
-        }
-        return total;
-      }, 0);
+  const ratingRows = useMemo<RatingRow[]>(
+    () =>
+      movies
+        .map((movie) => {
+          const points = votes.reduce((total, vote) => {
+            if (vote.first_place === movie) {
+              return total + lab1ScoreMap.first_place;
+            }
+            if (vote.second_place === movie) {
+              return total + lab1ScoreMap.second_place;
+            }
+            if (vote.third_place === movie) {
+              return total + lab1ScoreMap.third_place;
+            }
+            return total;
+          }, 0);
 
-      return { movie, points };
-    })
-    .sort((a, b) => b.points - a.points || a.movie.localeCompare(b.movie));
+          return { movie, points };
+        })
+        .sort((a, b) => b.points - a.points || a.movie.localeCompare(b.movie)),
+    [votes]
+  );
 
-  const structureRows: StructureRow[] = movies
-    .map((movie) => {
-      const firstPlace = votes.filter((vote) => vote.first_place === movie).length;
-      const secondPlace = votes.filter((vote) => vote.second_place === movie).length;
-      const thirdPlace = votes.filter((vote) => vote.third_place === movie).length;
+  const structureRows = useMemo<StructureRow[]>(
+    () =>
+      movies
+        .map((movie) => {
+          const firstPlace = votes.filter((vote) => vote.first_place === movie).length;
+          const secondPlace = votes.filter((vote) => vote.second_place === movie).length;
+          const thirdPlace = votes.filter((vote) => vote.third_place === movie).length;
 
-      return {
-        movie,
-        firstPlace,
-        secondPlace,
-        thirdPlace,
-        totalVotes: firstPlace + secondPlace + thirdPlace
-      };
-    })
-    .sort((a, b) => b.totalVotes - a.totalVotes || a.movie.localeCompare(b.movie));
+          return {
+            movie,
+            firstPlace,
+            secondPlace,
+            thirdPlace,
+            totalVotes: firstPlace + secondPlace + thirdPlace
+          };
+        })
+        .sort((a, b) => b.totalVotes - a.totalVotes || a.movie.localeCompare(b.movie)),
+    [votes]
+  );
 
-  const heuristicRankingRows: HeuristicRankingRow[] = heuristics
-    .map((heuristic) => {
-      const points = lab2Votes.reduce((total, vote) => {
-        if (vote.first_choice === heuristic.value) {
-          return total + lab2ScoreMap.first_choice;
-        }
-        if (vote.second_choice === heuristic.value) {
-          return total + lab2ScoreMap.second_choice;
-        }
-        if (vote.third_choice === heuristic.value) {
-          return total + lab2ScoreMap.third_choice;
-        }
-        return total;
-      }, 0);
+  const heuristicRankingRows = useMemo<HeuristicRankingRow[]>(
+    () =>
+      heuristics
+        .map((heuristic) => {
+          const points = lab2Votes.reduce((total, vote) => {
+            if (vote.first_choice === heuristic.value) {
+              return total + lab2ScoreMap.first_choice;
+            }
+            if (vote.second_choice === heuristic.value) {
+              return total + lab2ScoreMap.second_choice;
+            }
+            if (vote.third_choice === heuristic.value) {
+              return total + lab2ScoreMap.third_choice;
+            }
+            return total;
+          }, 0);
 
-      return {
+          return {
+            code: heuristic.code,
+            description: heuristic.description,
+            points
+          };
+        })
+        .sort((a, b) => b.points - a.points || a.code.localeCompare(b.code)),
+    [lab2Votes]
+  );
+
+  const lab2Analysis = useMemo(() => {
+    const topHeuristics = heuristicRankingRows.filter((row) => row.points > 0).slice(0, 3);
+    const baseSubset = ratingRows
+      .slice(0, movies.length)
+      .map((row) => structureRows.find((item) => item.movie === row.movie))
+      .filter((row): row is StructureRow => Boolean(row));
+
+    const heuristicSteps: HeuristicStepRow[] = [];
+    let currentSubset = [...baseSubset];
+
+    topHeuristics.forEach((heuristic) => {
+      const beforeCount = currentSubset.length;
+      const filteredSubset = currentSubset.filter((row) => !matchesHeuristic(row, heuristic.code));
+      const afterCount = filteredSubset.length;
+
+      heuristicSteps.push({
         code: heuristic.code,
-        description: heuristic.description,
-        points
-      };
-    })
-    .sort((a, b) => b.points - a.points || a.code.localeCompare(b.code));
+        beforeCount,
+        afterCount,
+        removedCount: beforeCount - afterCount
+      });
 
-  const topHeuristics = heuristicRankingRows.filter((row) => row.points > 0).slice(0, 3);
-  const baseSubset = ratingRows
-    .filter((row) => row.points > 0)
-    .slice(0, 10)
-    .map((row) => structureRows.find((item) => item.movie === row.movie))
-    .filter((row): row is StructureRow => Boolean(row));
-
-  const matchesHeuristic = (row: StructureRow, code: string) => {
-    switch (code) {
-      case 'E1':
-        return row.thirdPlace === 1;
-      case 'E2':
-        return row.secondPlace === 1;
-      case 'E3':
-        return row.firstPlace === 1;
-      case 'E4':
-        return row.thirdPlace === 2;
-      case 'E5':
-        return row.thirdPlace === 1 && row.secondPlace === 1;
-      case 'E6':
-        return row.firstPlace === 0;
-      case 'E7':
-        return row.totalVotes === 1;
-      default:
-        return false;
-    }
-  };
-
-  const heuristicSteps: HeuristicStepRow[] = [];
-  let currentSubset = [...baseSubset];
-
-  topHeuristics.forEach((heuristic) => {
-    const beforeCount = currentSubset.length;
-    const filteredSubset = currentSubset.filter((row) => !matchesHeuristic(row, heuristic.code));
-    const afterCount = filteredSubset.length;
-
-    heuristicSteps.push({
-      code: heuristic.code,
-      beforeCount,
-      afterCount,
-      removedCount: beforeCount - afterCount
+      currentSubset = filteredSubset;
     });
 
-    currentSubset = filteredSubset;
-  });
+    return {
+      baseSubset,
+      topHeuristics,
+      heuristicSteps,
+      finalSubset: currentSubset
+    };
+  }, [heuristicRankingRows, ratingRows, structureRows]);
 
-  const finalSubset = currentSubset;
+  const lab2FilterRows = useMemo<Lab2FilterRow[]>(
+    () =>
+      ratingRows.map((ratingRow, index) => {
+        const structureRow = structureRows.find((row) => row.movie === ratingRow.movie);
+
+        if (!structureRow) {
+          return {
+            movie: ratingRow.movie,
+            rank: index + 1,
+            ratingPoints: ratingRow.points,
+            firstPlace: 0,
+            secondPlace: 0,
+            thirdPlace: 0,
+            totalVotes: 0,
+            matchedHeuristics: [],
+            removedBy: null,
+            isIncluded: false
+          };
+        }
+
+        const matchedHeuristics = lab2Analysis.topHeuristics
+          .map((heuristic) => heuristic.code)
+          .filter((code) => matchesHeuristic(structureRow, code));
+
+        const removedBy =
+          lab2Analysis.topHeuristics.find((heuristic) => matchesHeuristic(structureRow, heuristic.code))
+            ?.code ?? null;
+
+        return {
+          ...structureRow,
+          rank: index + 1,
+          ratingPoints: ratingRow.points,
+          matchedHeuristics,
+          removedBy,
+          isIncluded: !removedBy
+        };
+      }),
+    [lab2Analysis.topHeuristics, ratingRows, structureRows]
+  );
+
+  const lab3Analysis = useMemo(() => {
+    const candidates = lab2Analysis.finalSubset.map((row) => row.movie);
+
+    const expertRows: Lab3ExpertRow[] = votes
+      .map((vote) => ({
+        expert: vote.expert,
+        choices: [vote.first_place, vote.second_place, vote.third_place].filter((movie) =>
+          candidates.includes(movie)
+        )
+      }))
+      .filter((row) => row.choices.length > 0);
+
+    const preferenceMatrix = candidates.map((leftCandidate) =>
+      candidates.map((rightCandidate) => {
+        if (leftCandidate === rightCandidate) {
+          return 0;
+        }
+
+        return expertRows.reduce((total, row) => {
+          const leftIndex = row.choices.indexOf(leftCandidate);
+          const rightIndex = row.choices.indexOf(rightCandidate);
+
+          if (leftIndex !== -1 && rightIndex !== -1) {
+            return leftIndex < rightIndex ? total + 1 : total;
+          }
+
+          if (leftIndex !== -1 && rightIndex === -1) {
+            return total + 1;
+          }
+
+          return total;
+        }, 0);
+      })
+    );
+
+    const permutationSamples: PermutationResult[] = [];
+    const bestBySum: PermutationResult[] = [];
+    const bestByMax: PermutationResult[] = [];
+    let minSum = Number.POSITIVE_INFINITY;
+    let minMax = Number.POSITIVE_INFINITY;
+
+    if (candidates.length > 0 && candidates.length <= 8) {
+      const working = [...candidates];
+
+      const evaluatePermutation = (ranking: string[]) => {
+        const positions = Object.fromEntries(ranking.map((movie, index) => [movie, index + 1]));
+
+        let sumDistance = 0;
+        let maxDistance = 0;
+
+        expertRows.forEach((row) => {
+          const distance = row.choices.reduce(
+            (total, movie, index) => total + Math.abs((positions[movie] ?? 0) - (index + 1)),
+            0
+          );
+
+          sumDistance += distance;
+          maxDistance = Math.max(maxDistance, distance);
+        });
+
+        const result = { ranking: [...ranking], sumDistance, maxDistance };
+
+        if (permutationSamples.length < 10) {
+          permutationSamples.push(result);
+        }
+
+        if (sumDistance < minSum) {
+          minSum = sumDistance;
+          bestBySum.length = 0;
+          bestBySum.push(result);
+        } else if (sumDistance === minSum && bestBySum.length < 5) {
+          bestBySum.push(result);
+        }
+
+        if (maxDistance < minMax) {
+          minMax = maxDistance;
+          bestByMax.length = 0;
+          bestByMax.push(result);
+        } else if (maxDistance === minMax && bestByMax.length < 5) {
+          bestByMax.push(result);
+        }
+      };
+
+      const generate = (n: number) => {
+        if (n === 1) {
+          evaluatePermutation(working);
+          return;
+        }
+
+        generate(n - 1);
+
+        for (let i = 0; i < n - 1; i += 1) {
+          if (n % 2 === 0) {
+            [working[i], working[n - 1]] = [working[n - 1], working[i]];
+          } else {
+            [working[0], working[n - 1]] = [working[n - 1], working[0]];
+          }
+
+          generate(n - 1);
+        }
+      };
+
+      generate(working.length);
+    }
+
+    return {
+      candidates,
+      expertRows,
+      preferenceMatrix,
+      permutationSamples,
+      bestBySum,
+      bestByMax,
+      canEnumerate: candidates.length > 0 && candidates.length <= 8
+    };
+  }, [lab2Analysis.finalSubset, votes]);
 
   if (!isLoggedIn) {
     return (
@@ -275,6 +506,13 @@ export default function Admin() {
               onClick={() => setActiveLab('lab2')}
             >
               Лаб2
+            </button>
+            <button
+              type='button'
+              className={`${styles.navButton} ${activeLab === 'lab3' ? styles.navButtonActive : ''}`}
+              onClick={() => setActiveLab('lab3')}
+            >
+              Лаб3
             </button>
           </div>
           <button
@@ -377,7 +615,7 @@ export default function Admin() {
               </div>
             </section>
           </>
-        ) : (
+        ) : activeLab === 'lab2' ? (
           <>
             <section className={styles.section}>
               <h2 className={styles.sectionTitle}>Протокол ЛР2</h2>
@@ -441,16 +679,59 @@ export default function Admin() {
             </section>
 
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Підмножина переможців (макс. 10)</h2>
+              <h2 className={styles.sectionTitle}>Фільтрування 20 об&apos;єктів</h2>
               <p className={styles.sectionText}>
                 Застосовано топ-3 евристики:{' '}
-                {topHeuristics.length > 0
-                  ? topHeuristics.map((heuristic) => heuristic.code).join(', ')
+                {lab2Analysis.topHeuristics.length > 0
+                  ? lab2Analysis.topHeuristics.map((heuristic) => heuristic.code).join(', ')
                   : 'ще не визначені'}
               </p>
               <p className={styles.sectionText}>
-                Базова підмножина автоматично формується з таблиці рейтингу ЛР1: беруться перші 10
-                об&apos;єктів із ненульовим балом.
+                Базова множина для ЛР2 формується з усіх 20 об&apos;єктів із таблиці рейтингу ЛР1.
+                Для кожного об&apos;єкта нижче показано, чи спрацьовує на ньому одна з обраних
+                евристик.
+              </p>
+              <div className={styles.tableWrap}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Місце</th>
+                      <th>Фільм</th>
+                      <th>Бали</th>
+                      <th>1 місце</th>
+                      <th>2 місце</th>
+                      <th>3 місце</th>
+                      <th>Всього голосів</th>
+                      <th>Спрацювали евристики</th>
+                      <th>Статус</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lab2FilterRows.map((row) => (
+                      <tr key={row.movie}>
+                        <td>{row.rank}</td>
+                        <td>{row.movie}</td>
+                        <td>{row.ratingPoints}</td>
+                        <td>{row.firstPlace}</td>
+                        <td>{row.secondPlace}</td>
+                        <td>{row.thirdPlace}</td>
+                        <td>{row.totalVotes}</td>
+                        <td>
+                          {row.matchedHeuristics.length > 0 ? row.matchedHeuristics.join(', ') : '-'}
+                        </td>
+                        <td>{row.isIncluded ? 'Залишився' : `Відсіяно (${row.removedBy})`}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Підсумок застосування евристик</h2>
+              <p className={styles.sectionText}>
+                На кожному кроці показано, як змінюється кількість об&apos;єктів після
+                послідовного застосування топ-3 евристик до всіх 20 фільмів.
               </p>
               <div className={styles.tableWrap}>
                 <table className={styles.table}>
@@ -463,8 +744,8 @@ export default function Admin() {
                     </tr>
                   </thead>
                   <tbody>
-                    {heuristicSteps.length > 0 ? (
-                      heuristicSteps.map((step) => (
+                    {lab2Analysis.heuristicSteps.length > 0 ? (
+                      lab2Analysis.heuristicSteps.map((step) => (
                         <tr key={step.code}>
                           <td>{step.code}</td>
                           <td>{step.beforeCount}</td>
@@ -485,13 +766,16 @@ export default function Admin() {
             </section>
 
             <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Фінальна підмножина після ЛР2</h2>
               <div className={styles.tableWrap}>
                 <table className={styles.table}>
                   <tbody>
-                    {finalSubset.length > 0 ? (
-                      finalSubset.map((row, index) => (
+                    {lab2Analysis.finalSubset.length > 0 ? (
+                      lab2Analysis.finalSubset.map((row, index) => (
                         <tr key={row.movie}>
-                          <td>{index + 1}. {row.movie}</td>
+                          <td>
+                            {index + 1}. {row.movie}
+                          </td>
                         </tr>
                       ))
                     ) : (
@@ -504,6 +788,130 @@ export default function Admin() {
                   </tbody>
                 </table>
               </div>
+            </section>
+          </>
+        ) : (
+          <>
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Лабораторна 3 - перелік об&apos;єктів</h2>
+              <p className={styles.sectionText}>
+                До ЛР3 передається фінальна підмножина переможців після ЛР2.
+              </p>
+              <div className={styles.tableWrap}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>№</th>
+                      <th>Об&apos;єкт</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lab3Analysis.candidates.length > 0 ? (
+                      lab3Analysis.candidates.map((candidate, index) => (
+                        <tr key={candidate}>
+                          <td>{index + 1}</td>
+                          <td>{candidate}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={2} className={`${styles.centerCell} ${styles.muted}`}>
+                          Після ЛР2 немає підмножини для ранжування
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <MatrixTable
+              title='Лабораторна 3 - матриця статистики переваг'
+              candidates={lab3Analysis.candidates}
+              matrix={lab3Analysis.preferenceMatrix}
+            />
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Лабораторна 3 - перевірка кількох перестановок</h2>
+              <p className={styles.sectionText}>
+                Для кожної перестановки обчислюється сума відстаней Кука до експертних трійок та
+                максимум індивідуальних відстаней.
+              </p>
+              {lab3Analysis.canEnumerate ? (
+                <div className={styles.tableWrap}>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th>Перестановка</th>
+                        <th>Сума відстаней</th>
+                        <th>Максимум</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lab3Analysis.permutationSamples.map((sample, index) => (
+                        <tr key={`${sample.ranking.join('|')}-${index}`}>
+                          <td>{sample.ranking.join(' > ')}</td>
+                          <td>{sample.sumDistance}</td>
+                          <td>{sample.maxDistance}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className={styles.sectionText}>
+                  Прямий перебір наразі запускається для підмножини до 8 об&apos;єктів, щоб не
+                  блокувати інтерфейс браузера. Зараз у підмножині {lab3Analysis.candidates.length}{' '}
+                  об&apos;єктів.
+                </p>
+              )}
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Лабораторна 3 - колективне ранжування</h2>
+              {lab3Analysis.canEnumerate ? (
+                <>
+                  <p className={styles.sectionText}>
+                    Нижче наведено перестановки, що дають мінімум суми відстаней та мінімум
+                    максимального відхилення.
+                  </p>
+                  <div className={styles.tableWrap}>
+                    <table className={styles.table}>
+                      <thead>
+                        <tr>
+                          <th>Критерій</th>
+                          <th>Ранжування</th>
+                          <th>Сума відстаней</th>
+                          <th>Максимум</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lab3Analysis.bestBySum.map((result, index) => (
+                          <tr key={`sum-${result.ranking.join('|')}-${index}`}>
+                            <td>Мінімум суми</td>
+                            <td>{result.ranking.join(' > ')}</td>
+                            <td>{result.sumDistance}</td>
+                            <td>{result.maxDistance}</td>
+                          </tr>
+                        ))}
+                        {lab3Analysis.bestByMax.map((result, index) => (
+                          <tr key={`max-${result.ranking.join('|')}-${index}`}>
+                            <td>Мінімум максимуму</td>
+                            <td>{result.ranking.join(' > ')}</td>
+                            <td>{result.sumDistance}</td>
+                            <td>{result.maxDistance}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <p className={styles.sectionText}>
+                  Для прямого перебору спершу потрібно зменшити підмножину до 8 або менше
+                  об&apos;єктів. Решта підготовчих розрахунків уже доступна в цій вкладці.
+                </p>
+              )}
             </section>
           </>
         )}
