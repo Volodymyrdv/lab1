@@ -80,6 +80,16 @@
   line-height: 1.6;
 }
 
+.subSection {
+  margin-top: 18px;
+}
+
+.subTitle {
+  margin: 0 0 12px;
+  color: #6d28d9;
+  font-size: 1rem;
+}
+
 .tableWrap {
   overflow-x: auto;
 }
@@ -104,6 +114,12 @@
 
 .table td {
   color: #333333;
+}
+
+.sequenceCell {
+  min-width: 360px;
+  white-space: normal;
+  line-height: 1.5;
 }
 
 .table td:last-child,

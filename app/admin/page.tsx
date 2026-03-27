@@ -69,6 +69,30 @@ interface PermutationResult {
   maxDistance: number;
 }
 
+interface WeightedCandidateRow {
+  movie: string;
+  weight: number;
+}
+
+interface GeneticGenerationRow {
+  generation: number;
+  chromosome: string[];
+  agreementScore: number;
+  baseScore: number;
+  fitness: number;
+  note: string;
+}
+
+interface GeneticPopulationRow {
+  generation: number;
+  individual: number;
+  chromosome: string[];
+  agreementScore: number;
+  baseScore: number;
+  fitness: number;
+  isBest: boolean;
+}
+
 const lab1ScoreMap = {
   first_place: 3,
   second_place: 2,
@@ -82,6 +106,116 @@ const lab2ScoreMap = {
 } as const;
 
 const getHeuristicCode = (value: string) => getHeuristicByValue(value)?.code ?? value;
+
+const createSeed = (value: string) =>
+  value.split('').reduce((hash, char) => hash * 31 + char.charCodeAt(0), 7);
+
+const getStableRandomWeight = (movie: string, index: number) => {
+  const seed = createSeed(`${movie}-${index}`);
+  const normalized = Math.abs(Math.sin(seed)) % 1;
+
+  return Number((0.5 + normalized * 0.5).toFixed(2));
+};
+
+const calculateBaseScore = (chromosome: WeightedCandidateRow[]) =>
+  Number(
+    chromosome
+      .reduce(
+        (total, candidate, index) => total + candidate.weight * (chromosome.length - index),
+        0
+      )
+      .toFixed(2)
+  );
+
+const calculateAgreementScore = (
+  chromosome: WeightedCandidateRow[],
+  expertRows: Lab3ExpertRow[]
+) => {
+  const positions = Object.fromEntries(
+    chromosome.map((candidate, index) => [candidate.movie, index])
+  );
+
+  const score = expertRows.reduce((total, expertRow) => {
+    let expertScore = 0;
+
+    for (let leftIndex = 0; leftIndex < expertRow.choices.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < expertRow.choices.length; rightIndex += 1) {
+        const leftMovie = expertRow.choices[leftIndex];
+        const rightMovie = expertRow.choices[rightIndex];
+
+        if (
+          (positions[leftMovie] ?? Number.POSITIVE_INFINITY) <
+          (positions[rightMovie] ?? Number.POSITIVE_INFINITY)
+        ) {
+          expertScore += 1;
+        }
+      }
+    }
+
+    return total + expertScore;
+  }, 0);
+
+  return Number(score.toFixed(2));
+};
+
+const calculateGeneticFitness = (
+  chromosome: WeightedCandidateRow[],
+  expertRows: Lab3ExpertRow[]
+) => {
+  const agreementScore = calculateAgreementScore(chromosome, expertRows);
+  const baseScore = calculateBaseScore(chromosome);
+  const fitness = Number((agreementScore * 10 + baseScore).toFixed(2));
+
+  return {
+    agreementScore,
+    baseScore,
+    fitness
+  };
+};
+
+const rotateChromosome = (chromosome: WeightedCandidateRow[], shift: number) => {
+  if (chromosome.length === 0) {
+    return [];
+  }
+
+  const offset = shift % chromosome.length;
+  return [...chromosome.slice(offset), ...chromosome.slice(0, offset)];
+};
+
+const crossoverChromosomes = (
+  firstParent: WeightedCandidateRow[],
+  secondParent: WeightedCandidateRow[]
+) => {
+  const pivot = Math.max(1, Math.floor(firstParent.length / 2));
+  const inheritedMovies = firstParent.slice(0, pivot).map((candidate) => candidate.movie);
+  const tail = secondParent.filter((candidate) => !inheritedMovies.includes(candidate.movie));
+
+  return [...firstParent.slice(0, pivot), ...tail];
+};
+
+const mutateChromosome = (chromosome: WeightedCandidateRow[], generation: number) => {
+  if (chromosome.length < 2) {
+    return chromosome;
+  }
+
+  const mutated = [...chromosome];
+  const leftIndex = generation % chromosome.length;
+  const rightIndex = (generation + 2) % chromosome.length;
+
+  [mutated[leftIndex], mutated[rightIndex]] = [mutated[rightIndex], mutated[leftIndex]];
+
+  return mutated;
+};
+
+const deduplicatePopulation = (population: WeightedCandidateRow[][]) =>
+  population.filter(
+    (chromosome, index, collection) =>
+      collection.findIndex(
+        (item) =>
+          item.map((candidate) => candidate.movie).join('|') ===
+          chromosome.map((candidate) => candidate.movie).join('|')
+      ) === index
+  );
 
 const matchesHeuristic = (row: StructureRow, code: string) => {
   switch (code) {
@@ -312,8 +446,9 @@ export default function Admin() {
           .filter((code) => matchesHeuristic(structureRow, code));
 
         const removedBy =
-          lab2Analysis.topHeuristics.find((heuristic) => matchesHeuristic(structureRow, heuristic.code))
-            ?.code ?? null;
+          lab2Analysis.topHeuristics.find((heuristic) =>
+            matchesHeuristic(structureRow, heuristic.code)
+          )?.code ?? null;
 
         return {
           ...structureRow,
@@ -326,6 +461,135 @@ export default function Admin() {
       }),
     [lab2Analysis.topHeuristics, ratingRows, structureRows]
   );
+
+  const lab2GeneticAnalysis = useMemo(() => {
+    const candidates = lab2Analysis.finalSubset.map((row) => row.movie);
+    const weightedCandidates = lab2Analysis.finalSubset.map((row, index) => ({
+      movie: row.movie,
+      weight: getStableRandomWeight(row.movie, index)
+    }));
+
+    const expertRows: Lab3ExpertRow[] = votes
+      .map((vote) => ({
+        expert: vote.expert,
+        choices: [vote.first_place, vote.second_place, vote.third_place].filter((movie) =>
+          candidates.includes(movie)
+        )
+      }))
+      .filter((row) => row.choices.length > 1);
+
+    if (weightedCandidates.length === 0) {
+      return {
+        weightedCandidates,
+        expertRows,
+        generations: [] as GeneticGenerationRow[],
+        populationRows: [] as GeneticPopulationRow[],
+        finalPopulationRows: [] as GeneticPopulationRow[]
+      };
+    }
+
+    const byWeightDesc = [...weightedCandidates].sort((a, b) => b.weight - a.weight);
+    const byWeightAsc = [...byWeightDesc].reverse();
+    const ratingOrder = [...weightedCandidates];
+    const targetPopulationSize = 40;
+
+    const initialPopulationPool: WeightedCandidateRow[][] = [
+      byWeightDesc,
+      byWeightAsc,
+      ratingOrder
+    ];
+
+    for (let shift = 1; shift < weightedCandidates.length; shift += 1) {
+      initialPopulationPool.push(rotateChromosome(byWeightDesc, shift));
+      initialPopulationPool.push(rotateChromosome(ratingOrder, shift));
+    }
+
+    initialPopulationPool.push(mutateChromosome(byWeightDesc, 1));
+    initialPopulationPool.push(mutateChromosome(ratingOrder, 2));
+
+    let population = deduplicatePopulation(initialPopulationPool).slice(0, targetPopulationSize);
+
+    const generations: GeneticGenerationRow[] = [];
+    const populationRows: GeneticPopulationRow[] = [];
+
+    for (let generation = 1; generation <= 4; generation += 1) {
+      const rankedPopulation = population
+        .map((chromosome) => ({
+          chromosome,
+          ...calculateGeneticFitness(chromosome, expertRows)
+        }))
+        .sort((left, right) => right.fitness - left.fitness);
+
+      rankedPopulation.forEach((candidate, index) => {
+        populationRows.push({
+          generation,
+          individual: index + 1,
+          chromosome: candidate.chromosome.map((item) => item.movie),
+          agreementScore: candidate.agreementScore,
+          baseScore: candidate.baseScore,
+          fitness: candidate.fitness,
+          isBest: index === 0
+        });
+      });
+
+      const bestChromosome = rankedPopulation[0];
+
+      generations.push({
+        generation,
+        chromosome: bestChromosome.chromosome.map((candidate) => candidate.movie),
+        agreementScore: bestChromosome.agreementScore,
+        baseScore: bestChromosome.baseScore,
+        fitness: bestChromosome.fitness,
+        note:
+          generation === 1
+            ? 'Початкова популяція'
+            : generation % 2 === 0
+              ? 'Відбір і схрещування'
+              : 'Мутація і оновлення'
+      });
+
+      const elites = rankedPopulation.slice(0, Math.max(2, Math.ceil(targetPopulationSize / 3)));
+      const nextPopulationPool = elites.map((item) => item.chromosome);
+
+      while (nextPopulationPool.length < targetPopulationSize) {
+        const firstParent =
+          elites[nextPopulationPool.length % elites.length]?.chromosome ?? elites[0].chromosome;
+        const secondParent =
+          elites[(nextPopulationPool.length + 1) % elites.length]?.chromosome ??
+          elites[0].chromosome;
+        const child = crossoverChromosomes(firstParent, secondParent);
+
+        nextPopulationPool.push(child);
+        nextPopulationPool.push(mutateChromosome(child, generation + nextPopulationPool.length));
+        nextPopulationPool.push(
+          rotateChromosome(firstParent, generation + nextPopulationPool.length)
+        );
+      }
+
+      population = deduplicatePopulation(nextPopulationPool).slice(0, targetPopulationSize);
+
+      if (population.length < targetPopulationSize) {
+        const fallbackPopulation = [...population];
+
+        for (let shift = 1; fallbackPopulation.length < targetPopulationSize; shift += 1) {
+          fallbackPopulation.push(rotateChromosome(byWeightDesc, shift));
+          fallbackPopulation.push(mutateChromosome(ratingOrder, generation + shift));
+        }
+
+        population = deduplicatePopulation(fallbackPopulation).slice(0, targetPopulationSize);
+      }
+    }
+
+    return {
+      weightedCandidates,
+      expertRows,
+      generations,
+      populationRows,
+      finalPopulationRows: populationRows.filter(
+        (row) => row.generation === generations[generations.length - 1]?.generation
+      )
+    };
+  }, [lab2Analysis.finalSubset, votes]);
 
   const lab3Analysis = useMemo(() => {
     const candidates = lab2Analysis.finalSubset.map((row) => row.movie);
@@ -717,7 +981,9 @@ export default function Admin() {
                         <td>{row.thirdPlace}</td>
                         <td>{row.totalVotes}</td>
                         <td>
-                          {row.matchedHeuristics.length > 0 ? row.matchedHeuristics.join(', ') : '-'}
+                          {row.matchedHeuristics.length > 0
+                            ? row.matchedHeuristics.join(', ')
+                            : '-'}
                         </td>
                         <td>{row.isIncluded ? 'Залишився' : `Відсіяно (${row.removedBy})`}</td>
                       </tr>
@@ -730,8 +996,8 @@ export default function Admin() {
             <section className={styles.section}>
               <h2 className={styles.sectionTitle}>Підсумок застосування евристик</h2>
               <p className={styles.sectionText}>
-                На кожному кроці показано, як змінюється кількість об&apos;єктів після
-                послідовного застосування топ-3 евристик до всіх 20 фільмів.
+                На кожному кроці показано, як змінюється кількість об&apos;єктів після послідовного
+                застосування топ-3 евристик до всіх 20 фільмів.
               </p>
               <div className={styles.tableWrap}>
                 <table className={styles.table}>
@@ -766,27 +1032,84 @@ export default function Admin() {
             </section>
 
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Фінальна підмножина після ЛР2</h2>
+              <h2 className={styles.sectionTitle}>
+                Фінальна підмножина після ЛР2 та генетичний алгоритм
+              </h2>
+              <p className={styles.sectionText}>
+                `Узгодженість` формується так: для кожного експерта береться його порядок фільмів із
+                ЛР1, але тільки для об&apos;єктів фінальної підмножини. Якщо в хромосомі порядок
+                пари фільмів збігається з експертним, особина отримує бал. `Базова оцінка`
+                обчислюється за випадковими вагами фільмів. Підсумково `fitness = узгодженість * 10
+                + базова оцінка`.
+              </p>
+
               <div className={styles.tableWrap}>
                 <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>№</th>
+                      <th>Фільм</th>
+                      <th>Випадкова базова оцінка</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    {lab2Analysis.finalSubset.length > 0 ? (
-                      lab2Analysis.finalSubset.map((row, index) => (
+                    {lab2GeneticAnalysis.weightedCandidates.length > 0 ? (
+                      lab2GeneticAnalysis.weightedCandidates.map((row, index) => (
                         <tr key={row.movie}>
-                          <td>
-                            {index + 1}. {row.movie}
-                          </td>
+                          <td>{index + 1}</td>
+                          <td>{row.movie}</td>
+                          <td>{row.weight}</td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td className={`${styles.centerCell} ${styles.muted}`}>
+                        <td colSpan={3} className={`${styles.centerCell} ${styles.muted}`}>
                           Після застосування евристик об&apos;єкти не залишилися
                         </td>
                       </tr>
                     )}
                   </tbody>
                 </table>
+              </div>
+
+              <div className={styles.subSection}>
+                <h3 className={styles.subTitle}>Фінальна популяція</h3>
+                <div className={styles.tableWrap}>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th>Особина</th>
+                        <th>Хромосома</th>
+                        <th>Узгодженість</th>
+                        <th>Базова оцінка</th>
+                        <th>Fitness</th>
+                        <th>Статус</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lab2GeneticAnalysis.finalPopulationRows.length > 0 ? (
+                        lab2GeneticAnalysis.finalPopulationRows.map((row) => (
+                          <tr
+                            key={`${row.generation}-${row.individual}-${row.chromosome.join('|')}`}
+                          >
+                            <td>{row.individual}</td>
+                            <td className={styles.sequenceCell}>{row.chromosome.join(' > ')}</td>
+                            <td>{row.agreementScore}</td>
+                            <td>{row.baseScore}</td>
+                            <td>{row.fitness}</td>
+                            <td>{row.isBest ? 'Найкраща в поколінні' : 'Популяція'}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={6} className={`${styles.centerCell} ${styles.muted}`}>
+                            Фінальна популяція ще не сформована
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </section>
           </>
@@ -832,7 +1155,9 @@ export default function Admin() {
             />
 
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Лабораторна 3 - перевірка кількох перестановок</h2>
+              <h2 className={styles.sectionTitle}>
+                Лабораторна 3 - перевірка кількох перестановок
+              </h2>
               <p className={styles.sectionText}>
                 Для кожної перестановки обчислюється сума відстаней Кука до експертних трійок та
                 максимум індивідуальних відстаней.
