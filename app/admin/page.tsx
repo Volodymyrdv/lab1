@@ -59,7 +59,6 @@ interface Lab2FilterRow extends StructureRow {
 }
 
 interface Lab3ExpertRow {
-  expert: string;
   choices: string[];
 }
 
@@ -68,15 +67,7 @@ interface PermutationResult {
   sumDistance: number;
 }
 
-interface GeneticGenerationRow {
-  generation: number;
-  chromosome: string[];
-  sumDistance: number;
-  fitness: number;
-  note: string;
-}
-
-interface GeneticPopulationRow {
+interface EvolutionPopulationRow {
   generation: number;
   individual: number;
   chromosome: string[];
@@ -114,7 +105,7 @@ const calculateSumHammingDistance = (ranking: string[], expertRows: Lab3ExpertRo
     0
   );
 
-const calculateGeneticFitness = (chromosome: string[], expertRows: Lab3ExpertRow[]) => {
+const calculateEvolutionFitness = (chromosome: string[], expertRows: Lab3ExpertRow[]) => {
   const sumDistance = calculateSumHammingDistance(chromosome, expertRows);
   const fitness = Number((1 / (1 + sumDistance)).toFixed(4));
 
@@ -131,14 +122,6 @@ const rotateChromosome = (chromosome: string[], shift: number) => {
 
   const offset = shift % chromosome.length;
   return [...chromosome.slice(offset), ...chromosome.slice(0, offset)];
-};
-
-const crossoverChromosomes = (firstParent: string[], secondParent: string[]) => {
-  const pivot = Math.max(1, Math.floor(firstParent.length / 2));
-  const inheritedMovies = firstParent.slice(0, pivot);
-  const tail = secondParent.filter((candidate) => !inheritedMovies.includes(candidate));
-
-  return [...firstParent.slice(0, pivot), ...tail];
 };
 
 const mutateChromosome = (chromosome: string[], generation: number) => {
@@ -450,12 +433,11 @@ export default function Admin() {
     [lab2Analysis.topHeuristics, ratingRows, structureRows]
   );
 
-  const lab2GeneticAnalysis = useMemo(() => {
+  const lab2EvolutionAnalysis = useMemo(() => {
     const candidates = lab2Analysis.finalSubset.map((row) => row.movie);
 
     const expertRows: Lab3ExpertRow[] = votes
       .map((vote) => ({
-        expert: vote.expert,
         choices: [vote.first_place, vote.second_place, vote.third_place]
       }))
       .filter((row) => row.choices.length > 0);
@@ -464,15 +446,15 @@ export default function Admin() {
       return {
         candidates,
         expertRows,
-        generations: [] as GeneticGenerationRow[],
-        populationRows: [] as GeneticPopulationRow[],
-        finalPopulationRows: [] as GeneticPopulationRow[]
+        finalPopulationRows: [] as EvolutionPopulationRow[]
       };
     }
 
     const defaultOrder = [...candidates];
     const reverseOrder = [...candidates].reverse();
-    const targetPopulationSize = 40;
+    const targetPopulationSize = 100;
+    const survivorCount = Math.max(2, Math.ceil(targetPopulationSize / 4));
+    const totalGenerations = 50;
 
     const initialPopulationPool: string[][] = [defaultOrder, reverseOrder];
 
@@ -486,14 +468,13 @@ export default function Admin() {
 
     let population = deduplicatePopulation(initialPopulationPool).slice(0, targetPopulationSize);
 
-    const generations: GeneticGenerationRow[] = [];
-    const populationRows: GeneticPopulationRow[] = [];
+    const populationRows: EvolutionPopulationRow[] = [];
 
-    for (let generation = 1; generation <= 4; generation += 1) {
+    for (let generation = 1; generation <= totalGenerations; generation += 1) {
       const rankedPopulation = population
         .map((chromosome) => ({
           chromosome,
-          ...calculateGeneticFitness(chromosome, expertRows)
+          ...calculateEvolutionFitness(chromosome, expertRows)
         }))
         .sort(
           (left, right) => right.fitness - left.fitness || left.sumDistance - right.sumDistance
@@ -510,37 +491,16 @@ export default function Admin() {
         });
       });
 
-      const bestChromosome = rankedPopulation[0];
-
-      generations.push({
-        generation,
-        chromosome: bestChromosome.chromosome,
-        sumDistance: bestChromosome.sumDistance,
-        fitness: bestChromosome.fitness,
-        note:
-          generation === 1
-            ? 'Початкова популяція'
-            : generation % 2 === 0
-              ? 'Відбір і схрещування'
-              : 'Мутація і оновлення'
-      });
-
-      const elites = rankedPopulation.slice(0, Math.max(2, Math.ceil(targetPopulationSize / 3)));
-      const nextPopulationPool = elites.map((item) => item.chromosome);
+      const survivors = rankedPopulation.slice(0, survivorCount);
+      const nextPopulationPool = survivors.map((item) => item.chromosome);
 
       while (nextPopulationPool.length < targetPopulationSize) {
-        const firstParent =
-          elites[nextPopulationPool.length % elites.length]?.chromosome ?? elites[0].chromosome;
-        const secondParent =
-          elites[(nextPopulationPool.length + 1) % elites.length]?.chromosome ??
-          elites[0].chromosome;
-        const child = crossoverChromosomes(firstParent, secondParent);
+        const parentIndex = nextPopulationPool.length % survivors.length;
+        const parent = survivors[parentIndex]?.chromosome ?? survivors[0].chromosome;
+        const mutationSeed = generation + nextPopulationPool.length;
 
-        nextPopulationPool.push(child);
-        nextPopulationPool.push(mutateChromosome(child, generation + nextPopulationPool.length));
-        nextPopulationPool.push(
-          rotateChromosome(firstParent, generation + nextPopulationPool.length)
-        );
+        nextPopulationPool.push(mutateChromosome(parent, mutationSeed));
+        nextPopulationPool.push(rotateChromosome(parent, mutationSeed));
       }
 
       population = deduplicatePopulation(nextPopulationPool).slice(0, targetPopulationSize);
@@ -560,11 +520,7 @@ export default function Admin() {
     return {
       candidates,
       expertRows,
-      generations,
-      populationRows,
-      finalPopulationRows: populationRows.filter(
-        (row) => row.generation === generations[generations.length - 1]?.generation
-      )
+      finalPopulationRows: populationRows.filter((row) => row.generation === totalGenerations)
     };
   }, [lab2Analysis.finalSubset, votes]);
 
@@ -574,7 +530,6 @@ export default function Admin() {
 
     const expertRows: Lab3ExpertRow[] = votes
       .map((vote) => ({
-        expert: vote.expert,
         choices: [vote.first_place, vote.second_place, vote.third_place]
       }))
       .filter((row) => row.choices.length > 0);
@@ -669,7 +624,6 @@ export default function Admin() {
     return {
       candidates,
       experts,
-      expertRows,
       expertRankMatrix,
       preferenceMatrix,
       permutationSamples,
@@ -1004,15 +958,17 @@ export default function Admin() {
 
             <section className={styles.section}>
               <h2 className={styles.sectionTitle}>
-                Фінальна підмножина після ЛР2 та генетичний алгоритм
+                Фінальна підмножина після ЛР2 та еволюційні стратегії
               </h2>
               <p className={styles.sectionText}>
-                Генетичний алгоритм тепер оцінює хромосоми через відстань Хемінга відносно
-                експертних трійок. Для кожного експерта його повна трійка напряму порівнюється з
-                першими трьома позиціями хромосоми без попередньої фільтрації. Для порівняння
-                популяції використовується `Сума відстаней Хемінга`, а fitness-функція знову
-                обчислюється як `1 / (1 + sumDistance)`. Найкращими вважаються хромосоми з
-                найбільшим значенням `fitness`, що відповідає найменшому значенню `sumDistance`.
+                Еволюційні стратегії оцінюють хромосоми через відстань Хемінга відносно експертних
+                трійок. Для кожного експерта його повна трійка напряму порівнюється з першими трьома
+                позиціями хромосоми без попередньої фільтрації. Для порівняння популяції
+                використовується `Сума відстаней Хемінга`, а fitness-функція знову обчислюється як
+                `1 / (1 + sumDistance)`. Найкращими вважаються хромосоми з найбільшим значенням
+                `fitness`, що відповідає найменшому значенню `sumDistance`. Нова популяція
+                формується без схрещування: лише через відбір найкращих особин, мутації та циклічні
+                зсуви.
               </p>
 
               <div className={styles.tableWrap}>
@@ -1024,8 +980,8 @@ export default function Admin() {
                     </tr>
                   </thead>
                   <tbody>
-                    {lab2GeneticAnalysis.candidates.length > 0 ? (
-                      lab2GeneticAnalysis.candidates.map((movie, index) => (
+                    {lab2EvolutionAnalysis.candidates.length > 0 ? (
+                      lab2EvolutionAnalysis.candidates.map((movie, index) => (
                         <tr key={movie}>
                           <td>{index + 1}</td>
                           <td>{movie}</td>
@@ -1056,8 +1012,8 @@ export default function Admin() {
                       </tr>
                     </thead>
                     <tbody>
-                      {lab2GeneticAnalysis.finalPopulationRows.length > 0 ? (
-                        lab2GeneticAnalysis.finalPopulationRows.map((row) => (
+                      {lab2EvolutionAnalysis.finalPopulationRows.length > 0 ? (
+                        lab2EvolutionAnalysis.finalPopulationRows.map((row) => (
                           <tr
                             key={`${row.generation}-${row.individual}-${row.chromosome.join('|')}`}
                           >
