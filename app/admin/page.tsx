@@ -66,19 +66,12 @@ interface Lab3ExpertRow {
 interface PermutationResult {
   ranking: string[];
   sumDistance: number;
-  maxDistance: number;
-}
-
-interface WeightedCandidateRow {
-  movie: string;
-  weight: number;
 }
 
 interface GeneticGenerationRow {
   generation: number;
   chromosome: string[];
-  agreementScore: number;
-  baseScore: number;
+  sumDistance: number;
   fitness: number;
   note: string;
 }
@@ -87,8 +80,7 @@ interface GeneticPopulationRow {
   generation: number;
   individual: number;
   chromosome: string[];
-  agreementScore: number;
-  baseScore: number;
+  sumDistance: number;
   fitness: number;
   isBest: boolean;
 }
@@ -107,73 +99,41 @@ const lab2ScoreMap = {
 
 const getHeuristicCode = (value: string) => getHeuristicByValue(value)?.code ?? value;
 
-const createSeed = (value: string) =>
-  value.split('').reduce((hash, char) => hash * 31 + char.charCodeAt(0), 7);
+const projectRankingToExpertChoices = (ranking: string[], expertChoices: string[]) =>
+  ranking.filter((movie) => expertChoices.includes(movie));
 
-const getStableRandomWeight = (movie: string, index: number) => {
-  const seed = createSeed(`${movie}-${index}`);
-  const normalized = Math.abs(Math.sin(seed)) % 1;
+const calculateHammingDistance = (ranking: string[], expertChoices: string[]) => {
+  const projectedRanking = projectRankingToExpertChoices(ranking, expertChoices);
 
-  return Number((0.5 + normalized * 0.5).toFixed(2));
+  return expertChoices.reduce(
+    (total, movie, index) => total + (projectedRanking[index] === movie ? 0 : 1),
+    0
+  );
 };
 
-const calculateBaseScore = (chromosome: WeightedCandidateRow[]) =>
-  Number(
-    chromosome
-      .reduce(
-        (total, candidate, index) => total + candidate.weight * (chromosome.length - index),
-        0
-      )
-      .toFixed(2)
-  );
-
-const calculateAgreementScore = (
-  chromosome: WeightedCandidateRow[],
+const calculateSumHammingDistance = (
+  ranking: string[],
   expertRows: Lab3ExpertRow[]
-) => {
-  const positions = Object.fromEntries(
-    chromosome.map((candidate, index) => [candidate.movie, index])
+) =>
+  expertRows.reduce(
+    (total, expertRow) => total + calculateHammingDistance(ranking, expertRow.choices),
+    0
   );
-
-  const score = expertRows.reduce((total, expertRow) => {
-    let expertScore = 0;
-
-    for (let leftIndex = 0; leftIndex < expertRow.choices.length; leftIndex += 1) {
-      for (let rightIndex = leftIndex + 1; rightIndex < expertRow.choices.length; rightIndex += 1) {
-        const leftMovie = expertRow.choices[leftIndex];
-        const rightMovie = expertRow.choices[rightIndex];
-
-        if (
-          (positions[leftMovie] ?? Number.POSITIVE_INFINITY) <
-          (positions[rightMovie] ?? Number.POSITIVE_INFINITY)
-        ) {
-          expertScore += 1;
-        }
-      }
-    }
-
-    return total + expertScore;
-  }, 0);
-
-  return Number(score.toFixed(2));
-};
 
 const calculateGeneticFitness = (
-  chromosome: WeightedCandidateRow[],
+  chromosome: string[],
   expertRows: Lab3ExpertRow[]
 ) => {
-  const agreementScore = calculateAgreementScore(chromosome, expertRows);
-  const baseScore = calculateBaseScore(chromosome);
-  const fitness = Number((agreementScore * 10 + baseScore).toFixed(2));
+  const sumDistance = calculateSumHammingDistance(chromosome, expertRows);
+  const fitness = Number((1 / (1 + sumDistance)).toFixed(4));
 
   return {
-    agreementScore,
-    baseScore,
+    sumDistance,
     fitness
   };
 };
 
-const rotateChromosome = (chromosome: WeightedCandidateRow[], shift: number) => {
+const rotateChromosome = (chromosome: string[], shift: number) => {
   if (chromosome.length === 0) {
     return [];
   }
@@ -183,17 +143,17 @@ const rotateChromosome = (chromosome: WeightedCandidateRow[], shift: number) => 
 };
 
 const crossoverChromosomes = (
-  firstParent: WeightedCandidateRow[],
-  secondParent: WeightedCandidateRow[]
+  firstParent: string[],
+  secondParent: string[]
 ) => {
   const pivot = Math.max(1, Math.floor(firstParent.length / 2));
-  const inheritedMovies = firstParent.slice(0, pivot).map((candidate) => candidate.movie);
-  const tail = secondParent.filter((candidate) => !inheritedMovies.includes(candidate.movie));
+  const inheritedMovies = firstParent.slice(0, pivot);
+  const tail = secondParent.filter((candidate) => !inheritedMovies.includes(candidate));
 
   return [...firstParent.slice(0, pivot), ...tail];
 };
 
-const mutateChromosome = (chromosome: WeightedCandidateRow[], generation: number) => {
+const mutateChromosome = (chromosome: string[], generation: number) => {
   if (chromosome.length < 2) {
     return chromosome;
   }
@@ -207,14 +167,10 @@ const mutateChromosome = (chromosome: WeightedCandidateRow[], generation: number
   return mutated;
 };
 
-const deduplicatePopulation = (population: WeightedCandidateRow[][]) =>
+const deduplicatePopulation = (population: string[][]) =>
   population.filter(
     (chromosome, index, collection) =>
-      collection.findIndex(
-        (item) =>
-          item.map((candidate) => candidate.movie).join('|') ===
-          chromosome.map((candidate) => candidate.movie).join('|')
-      ) === index
+      collection.findIndex((item) => item.join('|') === chromosome.join('|')) === index
   );
 
 const matchesHeuristic = (row: StructureRow, code: string) => {
@@ -272,6 +228,50 @@ function MatrixTable({
           </tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+function ExpertRankMatrixTable({
+  title,
+  candidates,
+  experts,
+  matrix
+}: {
+  title: string;
+  candidates: string[];
+  experts: string[];
+  matrix: number[][];
+}) {
+  return (
+    <section className={styles.section}>
+      <h2 className={styles.sectionTitle}>{title}</h2>
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>Об&apos;єкт</th>
+              {experts.map((expert, index) => (
+                <th key={expert}>{index + 1}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {candidates.map((candidate, rowIndex) => (
+              <tr key={candidate}>
+                <td>{candidate}</td>
+                {matrix[rowIndex].map((value, columnIndex) => (
+                  <td key={`${candidate}-${experts[columnIndex]}`}>{value}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className={styles.sectionText}>
+        Нумерація стовпців відповідає порядку експертів у протоколі ЛР1. `1`, `2`, `3` показують
+        місце об&apos;єкта в експерта, `0` означає, що об&apos;єкт не потрапив до його трійки.
+      </p>
     </section>
   );
 }
@@ -464,10 +464,6 @@ export default function Admin() {
 
   const lab2GeneticAnalysis = useMemo(() => {
     const candidates = lab2Analysis.finalSubset.map((row) => row.movie);
-    const weightedCandidates = lab2Analysis.finalSubset.map((row, index) => ({
-      movie: row.movie,
-      weight: getStableRandomWeight(row.movie, index)
-    }));
 
     const expertRows: Lab3ExpertRow[] = votes
       .map((vote) => ({
@@ -478,9 +474,9 @@ export default function Admin() {
       }))
       .filter((row) => row.choices.length > 1);
 
-    if (weightedCandidates.length === 0) {
+    if (candidates.length === 0) {
       return {
-        weightedCandidates,
+        candidates,
         expertRows,
         generations: [] as GeneticGenerationRow[],
         populationRows: [] as GeneticPopulationRow[],
@@ -488,24 +484,19 @@ export default function Admin() {
       };
     }
 
-    const byWeightDesc = [...weightedCandidates].sort((a, b) => b.weight - a.weight);
-    const byWeightAsc = [...byWeightDesc].reverse();
-    const ratingOrder = [...weightedCandidates];
+    const defaultOrder = [...candidates];
+    const reverseOrder = [...candidates].reverse();
     const targetPopulationSize = 40;
 
-    const initialPopulationPool: WeightedCandidateRow[][] = [
-      byWeightDesc,
-      byWeightAsc,
-      ratingOrder
-    ];
+    const initialPopulationPool: string[][] = [defaultOrder, reverseOrder];
 
-    for (let shift = 1; shift < weightedCandidates.length; shift += 1) {
-      initialPopulationPool.push(rotateChromosome(byWeightDesc, shift));
-      initialPopulationPool.push(rotateChromosome(ratingOrder, shift));
+    for (let shift = 1; shift < candidates.length; shift += 1) {
+      initialPopulationPool.push(rotateChromosome(defaultOrder, shift));
+      initialPopulationPool.push(rotateChromosome(reverseOrder, shift));
     }
 
-    initialPopulationPool.push(mutateChromosome(byWeightDesc, 1));
-    initialPopulationPool.push(mutateChromosome(ratingOrder, 2));
+    initialPopulationPool.push(mutateChromosome(defaultOrder, 1));
+    initialPopulationPool.push(mutateChromosome(reverseOrder, 2));
 
     let population = deduplicatePopulation(initialPopulationPool).slice(0, targetPopulationSize);
 
@@ -518,15 +509,14 @@ export default function Admin() {
           chromosome,
           ...calculateGeneticFitness(chromosome, expertRows)
         }))
-        .sort((left, right) => right.fitness - left.fitness);
+        .sort((left, right) => left.sumDistance - right.sumDistance || right.fitness - left.fitness);
 
       rankedPopulation.forEach((candidate, index) => {
         populationRows.push({
           generation,
           individual: index + 1,
-          chromosome: candidate.chromosome.map((item) => item.movie),
-          agreementScore: candidate.agreementScore,
-          baseScore: candidate.baseScore,
+          chromosome: candidate.chromosome,
+          sumDistance: candidate.sumDistance,
           fitness: candidate.fitness,
           isBest: index === 0
         });
@@ -536,9 +526,8 @@ export default function Admin() {
 
       generations.push({
         generation,
-        chromosome: bestChromosome.chromosome.map((candidate) => candidate.movie),
-        agreementScore: bestChromosome.agreementScore,
-        baseScore: bestChromosome.baseScore,
+        chromosome: bestChromosome.chromosome,
+        sumDistance: bestChromosome.sumDistance,
         fitness: bestChromosome.fitness,
         note:
           generation === 1
@@ -572,8 +561,8 @@ export default function Admin() {
         const fallbackPopulation = [...population];
 
         for (let shift = 1; fallbackPopulation.length < targetPopulationSize; shift += 1) {
-          fallbackPopulation.push(rotateChromosome(byWeightDesc, shift));
-          fallbackPopulation.push(mutateChromosome(ratingOrder, generation + shift));
+          fallbackPopulation.push(rotateChromosome(defaultOrder, shift));
+          fallbackPopulation.push(mutateChromosome(reverseOrder, generation + shift));
         }
 
         population = deduplicatePopulation(fallbackPopulation).slice(0, targetPopulationSize);
@@ -581,7 +570,7 @@ export default function Admin() {
     }
 
     return {
-      weightedCandidates,
+      candidates,
       expertRows,
       generations,
       populationRows,
@@ -593,6 +582,7 @@ export default function Admin() {
 
   const lab3Analysis = useMemo(() => {
     const candidates = lab2Analysis.finalSubset.map((row) => row.movie);
+    const experts = votes.map((vote) => vote.expert);
 
     const expertRows: Lab3ExpertRow[] = votes
       .map((vote) => ({
@@ -602,6 +592,24 @@ export default function Admin() {
         )
       }))
       .filter((row) => row.choices.length > 0);
+
+    const expertRankMatrix = candidates.map((candidate) =>
+      votes.map((vote) => {
+        if (vote.first_place === candidate) {
+          return 1;
+        }
+
+        if (vote.second_place === candidate) {
+          return 2;
+        }
+
+        if (vote.third_place === candidate) {
+          return 3;
+        }
+
+        return 0;
+      })
+    );
 
     const preferenceMatrix = candidates.map((leftCandidate) =>
       candidates.map((rightCandidate) => {
@@ -628,30 +636,14 @@ export default function Admin() {
 
     const permutationSamples: PermutationResult[] = [];
     const bestBySum: PermutationResult[] = [];
-    const bestByMax: PermutationResult[] = [];
     let minSum = Number.POSITIVE_INFINITY;
-    let minMax = Number.POSITIVE_INFINITY;
 
     if (candidates.length > 0 && candidates.length <= 8) {
       const working = [...candidates];
 
       const evaluatePermutation = (ranking: string[]) => {
-        const positions = Object.fromEntries(ranking.map((movie, index) => [movie, index + 1]));
-
-        let sumDistance = 0;
-        let maxDistance = 0;
-
-        expertRows.forEach((row) => {
-          const distance = row.choices.reduce(
-            (total, movie, index) => total + Math.abs((positions[movie] ?? 0) - (index + 1)),
-            0
-          );
-
-          sumDistance += distance;
-          maxDistance = Math.max(maxDistance, distance);
-        });
-
-        const result = { ranking: [...ranking], sumDistance, maxDistance };
+        const sumDistance = calculateSumHammingDistance(ranking, expertRows);
+        const result = { ranking: [...ranking], sumDistance };
 
         if (permutationSamples.length < 10) {
           permutationSamples.push(result);
@@ -663,14 +655,6 @@ export default function Admin() {
           bestBySum.push(result);
         } else if (sumDistance === minSum && bestBySum.length < 5) {
           bestBySum.push(result);
-        }
-
-        if (maxDistance < minMax) {
-          minMax = maxDistance;
-          bestByMax.length = 0;
-          bestByMax.push(result);
-        } else if (maxDistance === minMax && bestByMax.length < 5) {
-          bestByMax.push(result);
         }
       };
 
@@ -698,11 +682,12 @@ export default function Admin() {
 
     return {
       candidates,
+      experts,
       expertRows,
+      expertRankMatrix,
       preferenceMatrix,
       permutationSamples,
       bestBySum,
-      bestByMax,
       canEnumerate: candidates.length > 0 && candidates.length <= 8
     };
   }, [lab2Analysis.finalSubset, votes]);
@@ -1036,11 +1021,10 @@ export default function Admin() {
                 Фінальна підмножина після ЛР2 та генетичний алгоритм
               </h2>
               <p className={styles.sectionText}>
-                `Узгодженість` формується так: для кожного експерта береться його порядок фільмів із
-                ЛР1, але тільки для об&apos;єктів фінальної підмножини. Якщо в хромосомі порядок
-                пари фільмів збігається з експертним, особина отримує бал. `Базова оцінка`
-                обчислюється за випадковими вагами фільмів. Підсумково `fitness = узгодженість * 10
-                + базова оцінка`.
+                Генетичний алгоритм тепер оцінює хромосоми через відстань Хемінга відносно
+                експертних трійок. У підсумку залишається тільки `Сума відстаней Хемінга`, а
+                `fitness` обчислюється як `1 / (1 + sumDistance)`. Найкращими вважаються
+                хромосоми з найменшим значенням `sumDistance`.
               </p>
 
               <div className={styles.tableWrap}>
@@ -1049,21 +1033,19 @@ export default function Admin() {
                     <tr>
                       <th>№</th>
                       <th>Фільм</th>
-                      <th>Випадкова базова оцінка</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {lab2GeneticAnalysis.weightedCandidates.length > 0 ? (
-                      lab2GeneticAnalysis.weightedCandidates.map((row, index) => (
-                        <tr key={row.movie}>
+                    {lab2GeneticAnalysis.candidates.length > 0 ? (
+                      lab2GeneticAnalysis.candidates.map((movie, index) => (
+                        <tr key={movie}>
                           <td>{index + 1}</td>
-                          <td>{row.movie}</td>
-                          <td>{row.weight}</td>
+                          <td>{movie}</td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={3} className={`${styles.centerCell} ${styles.muted}`}>
+                        <td colSpan={2} className={`${styles.centerCell} ${styles.muted}`}>
                           Після застосування евристик об&apos;єкти не залишилися
                         </td>
                       </tr>
@@ -1080,8 +1062,7 @@ export default function Admin() {
                       <tr>
                         <th>Особина</th>
                         <th>Хромосома</th>
-                        <th>Узгодженість</th>
-                        <th>Базова оцінка</th>
+                        <th>Сума відстаней Хемінга</th>
                         <th>Fitness</th>
                         <th>Статус</th>
                       </tr>
@@ -1094,15 +1075,14 @@ export default function Admin() {
                           >
                             <td>{row.individual}</td>
                             <td className={styles.sequenceCell}>{row.chromosome.join(' > ')}</td>
-                            <td>{row.agreementScore}</td>
-                            <td>{row.baseScore}</td>
+                            <td>{row.sumDistance}</td>
                             <td>{row.fitness}</td>
                             <td>{row.isBest ? 'Найкраща в поколінні' : 'Популяція'}</td>
                           </tr>
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={6} className={`${styles.centerCell} ${styles.muted}`}>
+                          <td colSpan={5} className={`${styles.centerCell} ${styles.muted}`}>
                             Фінальна популяція ще не сформована
                           </td>
                         </tr>
@@ -1148,6 +1128,13 @@ export default function Admin() {
               </div>
             </section>
 
+            <ExpertRankMatrixTable
+              title='Лабораторна 3 - ранги за множинними порівняннями'
+              candidates={lab3Analysis.candidates}
+              experts={lab3Analysis.experts}
+              matrix={lab3Analysis.expertRankMatrix}
+            />
+
             <MatrixTable
               title='Лабораторна 3 - матриця статистики переваг'
               candidates={lab3Analysis.candidates}
@@ -1159,8 +1146,8 @@ export default function Admin() {
                 Лабораторна 3 - перевірка кількох перестановок
               </h2>
               <p className={styles.sectionText}>
-                Для кожної перестановки обчислюється сума відстаней Кука до експертних трійок та
-                максимум індивідуальних відстаней.
+                Для кожної перестановки обчислюється тільки сума відстаней Хемінга до експертних
+                трійок.
               </p>
               {lab3Analysis.canEnumerate ? (
                 <div className={styles.tableWrap}>
@@ -1168,8 +1155,7 @@ export default function Admin() {
                     <thead>
                       <tr>
                         <th>Перестановка</th>
-                        <th>Сума відстаней</th>
-                        <th>Максимум</th>
+                        <th>Сума відстаней Хемінга</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1177,7 +1163,6 @@ export default function Admin() {
                         <tr key={`${sample.ranking.join('|')}-${index}`}>
                           <td>{sample.ranking.join(' > ')}</td>
                           <td>{sample.sumDistance}</td>
-                          <td>{sample.maxDistance}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1197,8 +1182,7 @@ export default function Admin() {
               {lab3Analysis.canEnumerate ? (
                 <>
                   <p className={styles.sectionText}>
-                    Нижче наведено перестановки, що дають мінімум суми відстаней та мінімум
-                    максимального відхилення.
+                    Нижче наведено перестановки, що дають найменшу суму відстаней Хемінга.
                   </p>
                   <div className={styles.tableWrap}>
                     <table className={styles.table}>
@@ -1206,8 +1190,7 @@ export default function Admin() {
                         <tr>
                           <th>Критерій</th>
                           <th>Ранжування</th>
-                          <th>Сума відстаней</th>
-                          <th>Максимум</th>
+                          <th>Сума відстаней Хемінга</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1216,15 +1199,6 @@ export default function Admin() {
                             <td>Мінімум суми</td>
                             <td>{result.ranking.join(' > ')}</td>
                             <td>{result.sumDistance}</td>
-                            <td>{result.maxDistance}</td>
-                          </tr>
-                        ))}
-                        {lab3Analysis.bestByMax.map((result, index) => (
-                          <tr key={`max-${result.ranking.join('|')}-${index}`}>
-                            <td>Мінімум максимуму</td>
-                            <td>{result.ranking.join(' > ')}</td>
-                            <td>{result.sumDistance}</td>
-                            <td>{result.maxDistance}</td>
                           </tr>
                         ))}
                       </tbody>
