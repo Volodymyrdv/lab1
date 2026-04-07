@@ -72,7 +72,6 @@ interface GeneticGenerationRow {
   generation: number;
   chromosome: string[];
   sumDistance: number;
-  fitness: number;
   note: string;
 }
 
@@ -81,7 +80,6 @@ interface GeneticPopulationRow {
   individual: number;
   chromosome: string[];
   sumDistance: number;
-  fitness: number;
   isBest: boolean;
 }
 
@@ -99,14 +97,11 @@ const lab2ScoreMap = {
 
 const getHeuristicCode = (value: string) => getHeuristicByValue(value)?.code ?? value;
 
-const projectRankingToExpertChoices = (ranking: string[], expertChoices: string[]) =>
-  ranking.filter((movie) => expertChoices.includes(movie));
-
 const calculateHammingDistance = (ranking: string[], expertChoices: string[]) => {
-  const projectedRanking = projectRankingToExpertChoices(ranking, expertChoices);
+  const comparedRanking = ranking.slice(0, expertChoices.length);
 
   return expertChoices.reduce(
-    (total, movie, index) => total + (projectedRanking[index] === movie ? 0 : 1),
+    (total, movie, index) => total + (comparedRanking[index] === movie ? 0 : 1),
     0
   );
 };
@@ -120,18 +115,8 @@ const calculateSumHammingDistance = (
     0
   );
 
-const calculateGeneticFitness = (
-  chromosome: string[],
-  expertRows: Lab3ExpertRow[]
-) => {
-  const sumDistance = calculateSumHammingDistance(chromosome, expertRows);
-  const fitness = Number((1 / (1 + sumDistance)).toFixed(4));
-
-  return {
-    sumDistance,
-    fitness
-  };
-};
+const calculateChromosomeDistance = (chromosome: string[], expertRows: Lab3ExpertRow[]) =>
+  calculateSumHammingDistance(chromosome, expertRows);
 
 const rotateChromosome = (chromosome: string[], shift: number) => {
   if (chromosome.length === 0) {
@@ -468,11 +453,9 @@ export default function Admin() {
     const expertRows: Lab3ExpertRow[] = votes
       .map((vote) => ({
         expert: vote.expert,
-        choices: [vote.first_place, vote.second_place, vote.third_place].filter((movie) =>
-          candidates.includes(movie)
-        )
+        choices: [vote.first_place, vote.second_place, vote.third_place]
       }))
-      .filter((row) => row.choices.length > 1);
+      .filter((row) => row.choices.length > 0);
 
     if (candidates.length === 0) {
       return {
@@ -507,9 +490,9 @@ export default function Admin() {
       const rankedPopulation = population
         .map((chromosome) => ({
           chromosome,
-          ...calculateGeneticFitness(chromosome, expertRows)
+          sumDistance: calculateChromosomeDistance(chromosome, expertRows)
         }))
-        .sort((left, right) => left.sumDistance - right.sumDistance || right.fitness - left.fitness);
+        .sort((left, right) => right.sumDistance - left.sumDistance);
 
       rankedPopulation.forEach((candidate, index) => {
         populationRows.push({
@@ -517,7 +500,6 @@ export default function Admin() {
           individual: index + 1,
           chromosome: candidate.chromosome,
           sumDistance: candidate.sumDistance,
-          fitness: candidate.fitness,
           isBest: index === 0
         });
       });
@@ -528,7 +510,6 @@ export default function Admin() {
         generation,
         chromosome: bestChromosome.chromosome,
         sumDistance: bestChromosome.sumDistance,
-        fitness: bestChromosome.fitness,
         note:
           generation === 1
             ? 'Початкова популяція'
@@ -587,9 +568,7 @@ export default function Admin() {
     const expertRows: Lab3ExpertRow[] = votes
       .map((vote) => ({
         expert: vote.expert,
-        choices: [vote.first_place, vote.second_place, vote.third_place].filter((movie) =>
-          candidates.includes(movie)
-        )
+        choices: [vote.first_place, vote.second_place, vote.third_place]
       }))
       .filter((row) => row.choices.length > 0);
 
@@ -1022,9 +1001,11 @@ export default function Admin() {
               </h2>
               <p className={styles.sectionText}>
                 Генетичний алгоритм тепер оцінює хромосоми через відстань Хемінга відносно
-                експертних трійок. У підсумку залишається тільки `Сума відстаней Хемінга`, а
-                `fitness` обчислюється як `1 / (1 + sumDistance)`. Найкращими вважаються
-                хромосоми з найменшим значенням `sumDistance`.
+                експертних трійок. Для кожного експерта його повна трійка напряму порівнюється з
+                першими трьома позиціями хромосоми без попередньої фільтрації. Для порівняння
+                популяції використовується тільки `Сума відстаней Хемінга`, без окремої
+                fitness-функції. Найкращими вважаються хромосоми з найбільшим значенням
+                `sumDistance`.
               </p>
 
               <div className={styles.tableWrap}>
@@ -1063,7 +1044,6 @@ export default function Admin() {
                         <th>Особина</th>
                         <th>Хромосома</th>
                         <th>Сума відстаней Хемінга</th>
-                        <th>Fitness</th>
                         <th>Статус</th>
                       </tr>
                     </thead>
@@ -1076,13 +1056,12 @@ export default function Admin() {
                             <td>{row.individual}</td>
                             <td className={styles.sequenceCell}>{row.chromosome.join(' > ')}</td>
                             <td>{row.sumDistance}</td>
-                            <td>{row.fitness}</td>
                             <td>{row.isBest ? 'Найкраща в поколінні' : 'Популяція'}</td>
                           </tr>
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={5} className={`${styles.centerCell} ${styles.muted}`}>
+                          <td colSpan={4} className={`${styles.centerCell} ${styles.muted}`}>
                             Фінальна популяція ще не сформована
                           </td>
                         </tr>
