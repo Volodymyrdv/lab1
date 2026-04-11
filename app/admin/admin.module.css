@@ -135,6 +135,183 @@
   color: #777777;
 }
 
+.chartGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.chartCard {
+  padding: 16px;
+  border: 1px solid #dcc6ff;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #faf5ff 100%);
+}
+
+.chartHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.chartNumber {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: #8a2be2;
+  color: white;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.chartMovie {
+  color: #4a4a4a;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.chartRows {
+  display: grid;
+  gap: 10px;
+}
+
+.chartRow {
+  display: grid;
+  grid-template-columns: 66px 1fr 28px;
+  gap: 10px;
+  align-items: center;
+}
+
+.chartLabel {
+  color: #6d28d9;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.chartTrack {
+  height: 12px;
+  border-radius: 999px;
+  background: #efe4ff;
+  overflow: hidden;
+}
+
+.chartBar {
+  height: 100%;
+  min-width: 0;
+  border-radius: 999px;
+}
+
+.chartBarFirst {
+  background: linear-gradient(90deg, #8a2be2 0%, #a855f7 100%);
+}
+
+.chartBarSecond {
+  background: linear-gradient(90deg, #7c3aed 0%, #c084fc 100%);
+}
+
+.chartBarThird {
+  background: linear-gradient(90deg, #a855f7 0%, #e879f9 100%);
+}
+
+.chartBarParticipation {
+  background: linear-gradient(90deg, #4c1d95 0%, #8b5cf6 100%);
+}
+
+.chartValue {
+  color: #333333;
+  font-weight: 700;
+  text-align: right;
+}
+
+.resultCard {
+  padding: 16px 18px;
+  border: 1px solid #dcc6ff;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #faf5ff 100%);
+}
+
+.expertRankingGrid {
+  display: grid;
+  gap: 14px;
+}
+
+.expertRankingCard {
+  padding: 14px 16px;
+  border: 1px solid #dcc6ff;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(168, 85, 247, 0.14), transparent 32%),
+    linear-gradient(180deg, #ffffff 0%, #fcf8ff 100%);
+  box-shadow: 0 6px 14px rgba(138, 43, 226, 0.08);
+}
+
+.expertRankingHeader {
+  margin-bottom: 10px;
+}
+
+.expertRankingBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #8a2be2 0%, #a855f7 100%);
+  color: white;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  box-shadow: 0 6px 12px rgba(138, 43, 226, 0.18);
+}
+
+.expertRankingText {
+  margin: 0;
+  color: #3f3b4d;
+  line-height: 1.75;
+  font-size: 1rem;
+}
+
+.highlightResultCard {
+  padding: 18px;
+  border: 2px solid #8a2be2;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(168, 85, 247, 0.18), transparent 35%),
+    linear-gradient(180deg, #ffffff 0%, #f8f2ff 100%);
+  box-shadow: 0 10px 20px rgba(138, 43, 226, 0.12);
+}
+
+.highlightResultBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  margin-bottom: 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #8a2be2 0%, #a855f7 100%);
+  color: white;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.highlightResultText {
+  margin: 0 0 10px;
+  color: #382f4d;
+  font-size: 1.05rem;
+  line-height: 1.8;
+  font-weight: 600;
+}
+
+.highlightResultOrder {
+  margin: 0 0 12px;
+  color: #8a2be2;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
 @media (max-width: 768px) {
   .toolbar {
     align-items: stretch;

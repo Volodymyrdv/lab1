@@ -78,6 +78,28 @@ interface Lab3MatrixRow {
   expertValues: number[];
 }
 
+interface Lab3PreferenceStatsRow {
+  candidateNumber: number;
+  movie: string;
+  firstCount: number;
+  secondCount: number;
+  thirdCount: number;
+  participationCount: number;
+}
+
+interface Lab3RankMatrixRow {
+  candidateNumber: number;
+  movie: string;
+  expertRanks: number[];
+}
+
+interface ExhaustiveRankingResult {
+  ranking: string[];
+  distances: number[];
+  sumDistance: number;
+  maxDistance: number;
+}
+
 const lab1ScoreMap = {
   first_place: 3,
   second_place: 2,
@@ -210,6 +232,27 @@ const matchesHeuristic = (row: StructureRow, code: string) => {
       return false;
   }
 };
+
+const compareRankingsAlphabetically = (left: string[], right: string[]) =>
+  left.join('|').localeCompare(right.join('|'));
+
+const insertTopResult = (
+  collection: ExhaustiveRankingResult[],
+  candidate: ExhaustiveRankingResult,
+  comparator: (left: ExhaustiveRankingResult, right: ExhaustiveRankingResult) => number,
+  limit: number
+) => {
+  const next = [...collection, candidate].sort(comparator);
+  return next.slice(0, limit);
+};
+
+const formatRankingOrderNumbers = (ranking: string[], candidates: string[]) =>
+  ranking
+    .map((movie) => {
+      const candidateIndex = candidates.findIndex((candidate) => candidate === movie);
+      return candidateIndex >= 0 ? String(candidateIndex + 1) : '?';
+    })
+    .join(' ');
 
 export default function Admin() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -429,6 +472,130 @@ export default function Admin() {
     () => lab3MatrixRows[0]?.expertValues.map((_, index) => index + 1) ?? [],
     [lab3MatrixRows]
   );
+
+  const lab3PreferenceStats = useMemo<Lab3PreferenceStatsRow[]>(() => {
+    if (lab2FinalCandidates.length === 0 || lab2ExpertRankings.length === 0) {
+      return [];
+    }
+
+    return lab2FinalCandidates.map((movie, index) => {
+      let firstCount = 0;
+      let secondCount = 0;
+      let thirdCount = 0;
+
+      lab2ExpertRankings.forEach((expertRow) => {
+        const rankIndex = expertRow.ranking.findIndex((item) => item === movie);
+
+        if (rankIndex === 0) {
+          firstCount += 1;
+        } else if (rankIndex === 1) {
+          secondCount += 1;
+        } else if (rankIndex === 2) {
+          thirdCount += 1;
+        }
+      });
+
+      return {
+        candidateNumber: index + 1,
+        movie,
+        firstCount,
+        secondCount,
+        thirdCount,
+        participationCount: firstCount + secondCount + thirdCount
+      };
+    });
+  }, [lab2ExpertRankings, lab2FinalCandidates]);
+
+  const lab3RankMatrixRows = useMemo<Lab3RankMatrixRow[]>(() => {
+    if (lab2FinalCandidates.length === 0 || lab2ExpertRankings.length === 0) {
+      return [];
+    }
+
+    return lab2FinalCandidates.map((movie, index) => ({
+      candidateNumber: index + 1,
+      movie,
+      expertRanks: lab2ExpertRankings.map((expertRow) => {
+        const rankIndex = expertRow.ranking.findIndex((item) => item === movie);
+        return rankIndex >= 0 && rankIndex < 3 ? rankIndex + 1 : 0;
+      })
+    }));
+  }, [lab2ExpertRankings, lab2FinalCandidates]);
+
+  const lab3ExhaustiveSearch = useMemo(() => {
+    if (lab2FinalCandidates.length !== 8 || lab2ExpertRankings.length === 0) {
+      return null;
+    }
+
+    const permutations = generatePermutations(lab2FinalCandidates);
+    let minSumBest: ExhaustiveRankingResult | null = null;
+    let minMaxBest: ExhaustiveRankingResult | null = null;
+    let minSumTop: ExhaustiveRankingResult[] = [];
+    let minMaxTop: ExhaustiveRankingResult[] = [];
+
+    permutations.forEach((ranking) => {
+      const distances = lab2ExpertRankings.map((expertRow) =>
+        calculateHammingDistanceFull(ranking, expertRow.ranking)
+      );
+      const sumDistance = distances.reduce((total, value) => total + value, 0);
+      const maxDistance = Math.max(...distances);
+      const candidate = {
+        ranking: [...ranking],
+        distances,
+        sumDistance,
+        maxDistance
+      };
+
+      if (
+        !minSumBest ||
+        sumDistance < minSumBest.sumDistance ||
+        (sumDistance === minSumBest.sumDistance && maxDistance < minSumBest.maxDistance) ||
+        (sumDistance === minSumBest.sumDistance &&
+          maxDistance === minSumBest.maxDistance &&
+          compareRankingsAlphabetically(ranking, minSumBest.ranking) < 0)
+      ) {
+        minSumBest = candidate;
+      }
+
+      if (
+        !minMaxBest ||
+        maxDistance < minMaxBest.maxDistance ||
+        (maxDistance === minMaxBest.maxDistance && sumDistance < minMaxBest.sumDistance) ||
+        (maxDistance === minMaxBest.maxDistance &&
+          sumDistance === minMaxBest.sumDistance &&
+          compareRankingsAlphabetically(ranking, minMaxBest.ranking) < 0)
+      ) {
+        minMaxBest = candidate;
+      }
+
+      minSumTop = insertTopResult(
+        minSumTop,
+        candidate,
+        (left, right) =>
+          left.sumDistance - right.sumDistance ||
+          left.maxDistance - right.maxDistance ||
+          compareRankingsAlphabetically(left.ranking, right.ranking),
+        10
+      );
+
+      minMaxTop = insertTopResult(
+        minMaxTop,
+        candidate,
+        (left, right) =>
+          left.maxDistance - right.maxDistance ||
+          left.sumDistance - right.sumDistance ||
+          compareRankingsAlphabetically(left.ranking, right.ranking),
+        10
+      );
+    });
+
+    return {
+      totalPermutations: permutations.length,
+      minSumBest,
+      minSumTop,
+      minMaxBest,
+      minMaxTop
+    };
+  }, [lab2ExpertRankings, lab2FinalCandidates]);
 
   const runEvolutionSearch = async () => {
     if (lab2FinalCandidates.length === 0) {
@@ -954,11 +1121,14 @@ export default function Admin() {
             <section className={styles.section}>
               <h2 className={styles.sectionTitle}>Ранжування 15 експертів</h2>
               {lab2ExpertRankings.length > 0 ? (
-                <div className={styles.tableWrap}>
+                <div className={styles.expertRankingGrid}>
                   {lab2ExpertRankings.map((row) => (
-                    <p key={row.expert} className={styles.sectionText}>
-                      {row.expert}: {row.ranking.join(' > ')}
-                    </p>
+                    <article key={row.expert} className={styles.expertRankingCard}>
+                      <div className={styles.expertRankingHeader}>
+                        <span className={styles.expertRankingBadge}>{row.expert}</span>
+                      </div>
+                      <p className={styles.expertRankingText}>{row.ranking.join(' > ')}</p>
+                    </article>
                   ))}
                 </div>
               ) : (
@@ -1003,6 +1173,229 @@ export default function Admin() {
                   </tbody>
                 </table>
               </div>
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Статистика відношень переваги експертів</h2>
+              {lab3PreferenceStats.length > 0 ? (
+                <div className={styles.chartGrid}>
+                  {lab3PreferenceStats.map((row) => (
+                    <div key={row.candidateNumber} className={styles.chartCard}>
+                      <div className={styles.chartHeader}>
+                        <span className={styles.chartNumber}>{row.candidateNumber}</span>
+                        <span className={styles.chartMovie}>{row.movie}</span>
+                      </div>
+
+                      <div className={styles.chartRows}>
+                        <div className={styles.chartRow}>
+                          <span className={styles.chartLabel}>1 місце</span>
+                          <div className={styles.chartTrack}>
+                            <div
+                              className={`${styles.chartBar} ${styles.chartBarFirst}`}
+                              style={{ width: `${(row.firstCount / 15) * 100}%` }}
+                            />
+                          </div>
+                          <span className={styles.chartValue}>{row.firstCount}</span>
+                        </div>
+
+                        <div className={styles.chartRow}>
+                          <span className={styles.chartLabel}>2 місце</span>
+                          <div className={styles.chartTrack}>
+                            <div
+                              className={`${styles.chartBar} ${styles.chartBarSecond}`}
+                              style={{ width: `${(row.secondCount / 15) * 100}%` }}
+                            />
+                          </div>
+                          <span className={styles.chartValue}>{row.secondCount}</span>
+                        </div>
+
+                        <div className={styles.chartRow}>
+                          <span className={styles.chartLabel}>3 місце</span>
+                          <div className={styles.chartTrack}>
+                            <div
+                              className={`${styles.chartBar} ${styles.chartBarThird}`}
+                              style={{ width: `${(row.thirdCount / 15) * 100}%` }}
+                            />
+                          </div>
+                          <span className={styles.chartValue}>{row.thirdCount}</span>
+                        </div>
+
+                        <div className={styles.chartRow}>
+                          <span className={styles.chartLabel}>Участь</span>
+                          <div className={styles.chartTrack}>
+                            <div
+                              className={`${styles.chartBar} ${styles.chartBarParticipation}`}
+                              style={{ width: `${(row.participationCount / 15) * 100}%` }}
+                            />
+                          </div>
+                          <span className={styles.chartValue}>{row.participationCount}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className={`${styles.sectionText} ${styles.muted}`}>
+                  Для побудови статистики потрібні дані з фінальної підмножини ЛР2.
+                </p>
+              )}
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Ранги за множинними порівняннями</h2>
+              <div className={styles.tableWrap}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>№</th>
+                      {lab3ExpertHeaders.map((expert) => (
+                        <th key={`rank-expert-${expert}`}>Е{expert}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lab3RankMatrixRows.length > 0 ? (
+                      lab3RankMatrixRows.map((row) => (
+                        <tr key={row.candidateNumber}>
+                          <td>{row.candidateNumber}</td>
+                          {row.expertRanks.map((value, index) => (
+                            <td key={`${row.candidateNumber}-${index}`}>{value}</td>
+                          ))}
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td
+                          colSpan={Math.max(lab3ExpertHeaders.length + 1, 2)}
+                          className={`${styles.centerCell} ${styles.muted}`}
+                        >
+                          Для побудови таблиці потрібні дані з фінальної підмножини ЛР2.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Пошук мінімальної суми відстаней</h2>
+              {lab3ExhaustiveSearch?.minSumBest ? (
+                <>
+                  <p className={styles.sectionText}>
+                    Перебрано всіх перестановок: {lab3ExhaustiveSearch.totalPermutations}
+                  </p>
+                  <div className={styles.resultCard}>
+                    <p className={styles.sectionText}>
+                      Найкращий ранг: {lab3ExhaustiveSearch.minSumBest.ranking.join(' > ')}
+                    </p>
+                    <p className={styles.sectionText}>
+                      Сума відстаней: {lab3ExhaustiveSearch.minSumBest.sumDistance}
+                    </p>
+                    <p className={styles.sectionText}>
+                      Максимальна відстань: {lab3ExhaustiveSearch.minSumBest.maxDistance}
+                    </p>
+                    <p className={styles.sectionText}>
+                      Відстані до експертів:{' '}
+                      {lab3ExhaustiveSearch.minSumBest.distances
+                        .map((distance, index) => `Е${index + 1}=${distance}`)
+                        .join(', ')}
+                    </p>
+                  </div>
+                  <div className={styles.subSection}>
+                    <h3 className={styles.subTitle}>Топ-10 за сумою відстаней</h3>
+                    {lab3ExhaustiveSearch.minSumTop.map((row, index) => (
+                      <p key={`min-sum-${row.ranking.join('|')}`} className={styles.sectionText}>
+                        {index + 1}. {row.ranking.join(' > ')} (сума = {row.sumDistance}, max ={' '}
+                        {row.maxDistance})
+                      </p>
+                    ))}
+                  </div>
+                  <div className={styles.subSection}>
+                    <h3 className={styles.subTitle}>Перший результат</h3>
+                    <div className={styles.highlightResultCard}>
+                      <span className={styles.highlightResultBadge}>Найкраще ранжування</span>
+                      <p className={styles.highlightResultOrder}>
+                        {formatRankingOrderNumbers(
+                          lab3ExhaustiveSearch.minSumTop[0].ranking,
+                          lab2FinalCandidates
+                        )}
+                      </p>
+                      <p className={styles.highlightResultText}>
+                        {lab3ExhaustiveSearch.minSumTop[0].ranking.join(' > ')}
+                      </p>
+                      <p className={styles.sectionText}>
+                        сума = {lab3ExhaustiveSearch.minSumTop[0].sumDistance}, max ={' '}
+                        {lab3ExhaustiveSearch.minSumTop[0].maxDistance}
+                      </p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <p className={`${styles.sectionText} ${styles.muted}`}>
+                  Для точного пошуку потрібно рівно 8 об&apos;єктів у фінальній підмножині ЛР2.
+                </p>
+              )}
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Пошук мінімуму максимумів MinMax</h2>
+              {lab3ExhaustiveSearch?.minMaxBest ? (
+                <>
+                  <p className={styles.sectionText}>
+                    Перебрано всіх перестановок: {lab3ExhaustiveSearch.totalPermutations}
+                  </p>
+                  <div className={styles.resultCard}>
+                    <p className={styles.sectionText}>
+                      Найкращий ранг: {lab3ExhaustiveSearch.minMaxBest.ranking.join(' > ')}
+                    </p>
+                    <p className={styles.sectionText}>
+                      Максимальна відстань: {lab3ExhaustiveSearch.minMaxBest.maxDistance}
+                    </p>
+                    <p className={styles.sectionText}>
+                      Сума відстаней: {lab3ExhaustiveSearch.minMaxBest.sumDistance}
+                    </p>
+                    <p className={styles.sectionText}>
+                      Відстані до експертів:{' '}
+                      {lab3ExhaustiveSearch.minMaxBest.distances
+                        .map((distance, index) => `Е${index + 1}=${distance}`)
+                        .join(', ')}
+                    </p>
+                  </div>
+                  <div className={styles.subSection}>
+                    <h3 className={styles.subTitle}>Топ-10 за критерієм MinMax</h3>
+                    {lab3ExhaustiveSearch.minMaxTop.map((row, index) => (
+                      <p key={`min-max-${row.ranking.join('|')}`} className={styles.sectionText}>
+                        {index + 1}. {row.ranking.join(' > ')} (max = {row.maxDistance}, сума ={' '}
+                        {row.sumDistance})
+                      </p>
+                    ))}
+                  </div>
+                  <div className={styles.subSection}>
+                    <h3 className={styles.subTitle}>Перший результат</h3>
+                    <div className={styles.highlightResultCard}>
+                      <span className={styles.highlightResultBadge}>Найкраще ранжування</span>
+                      <p className={styles.highlightResultOrder}>
+                        {formatRankingOrderNumbers(
+                          lab3ExhaustiveSearch.minMaxTop[0].ranking,
+                          lab2FinalCandidates
+                        )}
+                      </p>
+                      <p className={styles.highlightResultText}>
+                        {lab3ExhaustiveSearch.minMaxTop[0].ranking.join(' > ')}
+                      </p>
+                      <p className={styles.sectionText}>
+                        max = {lab3ExhaustiveSearch.minMaxTop[0].maxDistance}, сума ={' '}
+                        {lab3ExhaustiveSearch.minMaxTop[0].sumDistance}
+                      </p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <p className={`${styles.sectionText} ${styles.muted}`}>
+                  Для точного пошуку потрібно рівно 8 об&apos;єктів у фінальній підмножині ЛР2.
+                </p>
+              )}
             </section>
           </>
         ) : null}
