@@ -312,6 +312,35 @@
   letter-spacing: 0.08em;
 }
 
+.controlRow {
+  display: flex;
+  align-items: end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.controlLabel {
+  color: #4a4a4a;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.select {
+  min-width: 280px;
+  padding: 12px 14px;
+  border: 2px solid #8a2be2;
+  border-radius: 10px;
+  background: white;
+  color: #333333;
+  font-size: 0.95rem;
+}
+
+.select:focus {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(138, 43, 226, 0.12);
+}
+
 @media (max-width: 768px) {
   .toolbar {
     align-items: stretch;
@@ -324,5 +353,14 @@
 
   .section {
     padding: 14px;
+  }
+
+  .controlRow {
+    align-items: stretch;
+  }
+
+  .select {
+    min-width: 100%;
+    width: 100%;
   }
 }

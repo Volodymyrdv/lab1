@@ -100,6 +100,18 @@ interface ExhaustiveRankingResult {
   maxDistance: number;
 }
 
+interface Lab3EvolutionResult {
+  objective: 'min-sum' | 'min-max';
+  totalPermutations: number;
+  populationSize: number;
+  generations: number;
+  bestRanking: string[];
+  bestSumDistance: number;
+  bestMaxDistance: number;
+  topRankings: { ranking: string[]; sumDistance: number; maxDistance: number }[];
+  durationMs: number;
+}
+
 const lab1ScoreMap = {
   first_place: 3,
   second_place: 2,
@@ -264,6 +276,9 @@ export default function Admin() {
   const [message, setMessage] = useState('');
   const [evolutionResult, setEvolutionResult] = useState<EvolutionResult | null>(null);
   const [isEvolutionRunning, setIsEvolutionRunning] = useState(false);
+  const [lab3FitnessMode, setLab3FitnessMode] = useState<'min-sum' | 'min-max'>('min-sum');
+  const [lab3EvolutionResult, setLab3EvolutionResult] = useState<Lab3EvolutionResult | null>(null);
+  const [isLab3EvolutionRunning, setIsLab3EvolutionRunning] = useState(false);
 
   useEffect(() => {
     if (!isLoggedIn) {
@@ -697,6 +712,179 @@ export default function Admin() {
       durationMs: Date.now() - start
     });
     setIsEvolutionRunning(false);
+  };
+
+  const runLab3EvolutionSearch = async () => {
+    if (lab2FinalCandidates.length !== 8 || lab2ExpertRankings.length === 0) {
+      setLab3EvolutionResult(null);
+      return;
+    }
+
+    setIsLab3EvolutionRunning(true);
+    setLab3EvolutionResult(null);
+
+    const start = Date.now();
+    const totalPermutations = factorial(lab2FinalCandidates.length);
+    const populationSize = totalPermutations;
+    const generations = 20;
+    const tournamentSize = 3;
+    const mutationRate = 0.35;
+    let population = generatePermutations(lab2FinalCandidates);
+
+    const isBetterLab3 = (
+      left: { ranking: string[]; sumDistance: number; maxDistance: number },
+      right: { ranking: string[]; sumDistance: number; maxDistance: number }
+    ) => {
+      if (lab3FitnessMode === 'min-sum') {
+        return (
+          left.sumDistance < right.sumDistance ||
+          (left.sumDistance === right.sumDistance && left.maxDistance < right.maxDistance) ||
+          (left.sumDistance === right.sumDistance &&
+            left.maxDistance === right.maxDistance &&
+            compareRankingsAlphabetically(left.ranking, right.ranking) < 0)
+        );
+      }
+
+      return (
+        left.maxDistance < right.maxDistance ||
+        (left.maxDistance === right.maxDistance && left.sumDistance < right.sumDistance) ||
+        (left.maxDistance === right.maxDistance &&
+          left.sumDistance === right.sumDistance &&
+          compareRankingsAlphabetically(left.ranking, right.ranking) < 0)
+      );
+    };
+
+    const evaluatePopulation = async (current: string[][]) => {
+      const chunkSize = 1000;
+      const chunks: string[][][] = [];
+
+      for (let index = 0; index < current.length; index += chunkSize) {
+        chunks.push(current.slice(index, index + chunkSize));
+      }
+
+      const evaluatedChunks = await Promise.all(
+        chunks.map(
+          (chunk) =>
+            new Promise<{ ranking: string[]; sumDistance: number; maxDistance: number }[]>(
+              (resolve) => {
+                setTimeout(() => {
+                  const evaluated = chunk.map((ranking) => {
+                    const distances = lab2ExpertRankings.map((expertRow) =>
+                      calculateHammingDistanceFull(ranking, expertRow.ranking)
+                    );
+
+                    return {
+                      ranking,
+                      sumDistance: distances.reduce((total, value) => total + value, 0),
+                      maxDistance: Math.max(...distances)
+                    };
+                  });
+
+                  resolve(evaluated);
+                }, 0);
+              }
+            )
+        )
+      );
+
+      return evaluatedChunks.flat();
+    };
+
+    const pickParent = (
+      populationRows: { ranking: string[]; sumDistance: number; maxDistance: number }[]
+    ) => {
+      let best = populationRows[Math.floor(Math.random() * populationRows.length)];
+
+      for (let i = 1; i < tournamentSize; i += 1) {
+        const candidate = populationRows[Math.floor(Math.random() * populationRows.length)];
+        if (isBetterLab3(candidate, best)) {
+          best = candidate;
+        }
+      }
+
+      return best;
+    };
+
+    let evaluated = await evaluatePopulation(population);
+    let best = evaluated[0];
+    let globalTop: { ranking: string[]; sumDistance: number; maxDistance: number }[] = [];
+
+    for (let generation = 1; generation <= generations; generation += 1) {
+      for (let i = 1; i < evaluated.length; i += 1) {
+        if (isBetterLab3(evaluated[i], best)) {
+          best = evaluated[i];
+        }
+      }
+
+      const currentTop = [...evaluated]
+        .sort((left, right) => {
+          if (lab3FitnessMode === 'min-sum') {
+            return (
+              left.sumDistance - right.sumDistance ||
+              left.maxDistance - right.maxDistance ||
+              compareRankingsAlphabetically(left.ranking, right.ranking)
+            );
+          }
+
+          return (
+            left.maxDistance - right.maxDistance ||
+            left.sumDistance - right.sumDistance ||
+            compareRankingsAlphabetically(left.ranking, right.ranking)
+          );
+        })
+        .slice(0, 40)
+        .map((item) => ({
+          ranking: item.ranking,
+          sumDistance: item.sumDistance,
+          maxDistance: item.maxDistance
+        }));
+
+      globalTop = [...globalTop, ...currentTop]
+        .sort((left, right) => {
+          if (lab3FitnessMode === 'min-sum') {
+            return (
+              left.sumDistance - right.sumDistance ||
+              left.maxDistance - right.maxDistance ||
+              compareRankingsAlphabetically(left.ranking, right.ranking)
+            );
+          }
+
+          return (
+            left.maxDistance - right.maxDistance ||
+            left.sumDistance - right.sumDistance ||
+            compareRankingsAlphabetically(left.ranking, right.ranking)
+          );
+        })
+        .filter(
+          (item, index, collection) =>
+            collection.findIndex((row) => row.ranking.join('|') === item.ranking.join('|')) ===
+            index
+        )
+        .slice(0, 40);
+
+      const nextPopulation: string[][] = [];
+      while (nextPopulation.length < populationSize) {
+        const parent = pickParent(evaluated);
+        const child = Math.random() < mutationRate ? mutateChromosome(parent.ranking) : parent.ranking;
+        nextPopulation.push(child);
+      }
+
+      population = nextPopulation;
+      evaluated = await evaluatePopulation(population);
+    }
+
+    setLab3EvolutionResult({
+      objective: lab3FitnessMode,
+      totalPermutations,
+      populationSize,
+      generations,
+      bestRanking: best.ranking,
+      bestSumDistance: best.sumDistance,
+      bestMaxDistance: best.maxDistance,
+      topRankings: globalTop,
+      durationMs: Date.now() - start
+    });
+    setIsLab3EvolutionRunning(false);
   };
   if (!isLoggedIn) {
     return (
@@ -1395,6 +1583,78 @@ export default function Admin() {
                 <p className={`${styles.sectionText} ${styles.muted}`}>
                   Для точного пошуку потрібно рівно 8 об&apos;єктів у фінальній підмножині ЛР2.
                 </p>
+              )}
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Еволюційні стратегії</h2>
+              <div className={styles.controlRow}>
+                <div className={baseStyles.inputGroup}>
+                  <label htmlFor='lab3-fitness' className={styles.controlLabel}>
+                    Фітнес-функція
+                  </label>
+                  <select
+                    id='lab3-fitness'
+                    value={lab3FitnessMode}
+                    onChange={(e) =>
+                      setLab3FitnessMode(e.target.value as 'min-sum' | 'min-max')
+                    }
+                    className={styles.select}
+                  >
+                    <option value='min-sum'>Мінімальна сума відстаней</option>
+                    <option value='min-max'>MinMax</option>
+                  </select>
+                </div>
+                <button
+                  type='button'
+                  className={baseStyles.button}
+                  onClick={runLab3EvolutionSearch}
+                  disabled={isLab3EvolutionRunning || lab2FinalCandidates.length !== 8}
+                >
+                  {isLab3EvolutionRunning ? 'Розрахунок...' : 'Запустити алгоритм'}
+                </button>
+              </div>
+              {lab2FinalCandidates.length !== 8 && (
+                <p className={`${styles.sectionText} ${styles.muted}`}>
+                  Для запуску потрібно рівно 8 об&apos;єктів у фінальній підмножині.
+                </p>
+              )}
+              {lab3EvolutionResult && (
+                <div className={styles.resultCard}>
+                  <p className={styles.sectionText}>
+                    Фітнес-функція:{' '}
+                    {lab3EvolutionResult.objective === 'min-sum'
+                      ? 'Мінімальна сума відстаней'
+                      : 'MinMax'}
+                  </p>
+                  <p className={styles.sectionText}>
+                    Найкраще ранжування: {lab3EvolutionResult.bestRanking.join(' > ')}
+                  </p>
+                  <p className={styles.sectionText}>
+                    Сума відстаней: {lab3EvolutionResult.bestSumDistance}
+                  </p>
+                  <p className={styles.sectionText}>
+                    Максимальна відстань: {lab3EvolutionResult.bestMaxDistance}
+                  </p>
+                  <p className={styles.sectionText}>
+                    Популяція: {lab3EvolutionResult.populationSize}, поколінь:{' '}
+                    {lab3EvolutionResult.generations}, час: {lab3EvolutionResult.durationMs} мс
+                  </p>
+                </div>
+              )}
+              {lab3EvolutionResult && lab3EvolutionResult.topRankings.length > 0 && (
+                <div className={styles.subSection}>
+                  <h3 className={styles.subTitle}>Топ-40 еволюційного пошуку</h3>
+                  {lab3EvolutionResult.topRankings.map((row, index) => (
+                    <p
+                      key={`lab3-evolution-${row.ranking.join('|')}-${index}`}
+                      className={styles.sectionText}
+                    >
+                      {index + 1}. {row.ranking.join(' > ')} (сума = {row.sumDistance}, max ={' '}
+                      {row.maxDistance})
+                    </p>
+                  ))}
+                </div>
               )}
             </section>
           </>
