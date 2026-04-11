@@ -73,6 +73,11 @@ interface EvolutionResult {
   durationMs: number;
 }
 
+interface Lab3MatrixRow {
+  comparison: number;
+  expertValues: number[];
+}
+
 const lab1ScoreMap = {
   first_place: 3,
   second_place: 2,
@@ -212,7 +217,7 @@ export default function Admin() {
   const [password, setPassword] = useState('');
   const [votes, setVotes] = useState<VoteRow[]>([]);
   const [lab2Votes, setLab2Votes] = useState<Lab2VoteRow[]>([]);
-  const [activeLab, setActiveLab] = useState<'lab1' | 'lab2'>('lab1');
+  const [activeLab, setActiveLab] = useState<'lab1' | 'lab2' | 'lab3'>('lab1');
   const [message, setMessage] = useState('');
   const [evolutionResult, setEvolutionResult] = useState<EvolutionResult | null>(null);
   const [isEvolutionRunning, setIsEvolutionRunning] = useState(false);
@@ -404,6 +409,27 @@ export default function Admin() {
     [lab2FinalCandidates]
   );
 
+  const lab3MatrixRows = useMemo<Lab3MatrixRow[]>(() => {
+    if (lab2FinalCandidates.length === 0 || lab2ExpertRankings.length === 0) {
+      return [];
+    }
+
+    return [0, 1, 2].map((comparisonIndex) => ({
+      comparison: comparisonIndex + 1,
+      expertValues: lab2ExpertRankings.map((expertRow) => {
+        const movie = expertRow.ranking[comparisonIndex];
+        const candidateIndex = lab2FinalCandidates.findIndex((candidate) => candidate === movie);
+
+        return candidateIndex >= 0 ? candidateIndex + 1 : 0;
+      })
+    }));
+  }, [lab2ExpertRankings, lab2FinalCandidates]);
+
+  const lab3ExpertHeaders = useMemo(
+    () => lab3MatrixRows[0]?.expertValues.map((_, index) => index + 1) ?? [],
+    [lab3MatrixRows]
+  );
+
   const runEvolutionSearch = async () => {
     if (lab2FinalCandidates.length === 0) {
       setEvolutionResult(null);
@@ -568,6 +594,13 @@ export default function Admin() {
               onClick={() => setActiveLab('lab2')}
             >
               Лаб2
+            </button>
+            <button
+              type='button'
+              className={`${styles.navButton} ${activeLab === 'lab3' ? styles.navButtonActive : ''}`}
+              onClick={() => setActiveLab('lab3')}
+            >
+              Лаб3
             </button>
           </div>
           <button
@@ -914,6 +947,62 @@ export default function Admin() {
                   </div>
                 </div>
               )}
+            </section>
+          </>
+        ) : activeLab === 'lab3' ? (
+          <>
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Ранжування 15 експертів</h2>
+              {lab2ExpertRankings.length > 0 ? (
+                <div className={styles.tableWrap}>
+                  {lab2ExpertRankings.map((row) => (
+                    <p key={row.expert} className={styles.sectionText}>
+                      {row.expert}: {row.ranking.join(' > ')}
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <p className={`${styles.sectionText} ${styles.muted}`}>
+                  Для побудови ранжування потрібні дані з блоку ЛР2.
+                </p>
+              )}
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Множинні порівняння</h2>
+              <div className={styles.tableWrap}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Порівняння</th>
+                      {lab3ExpertHeaders.map((expert) => (
+                        <th key={expert}>Експерт {expert}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lab3MatrixRows.length > 0 ? (
+                      lab3MatrixRows.map((row) => (
+                        <tr key={row.comparison}>
+                          <td>{row.comparison}</td>
+                          {row.expertValues.map((value, index) => (
+                            <td key={`${row.comparison}-${index}`}>{value}</td>
+                          ))}
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td
+                          colSpan={Math.max(lab3ExpertHeaders.length + 1, 2)}
+                          className={`${styles.centerCell} ${styles.muted}`}
+                        >
+                          Для побудови таблиці потрібні дані з фінальної підмножини ЛР2.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </section>
           </>
         ) : null}
