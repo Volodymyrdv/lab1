@@ -58,22 +58,19 @@ interface Lab2FilterRow extends StructureRow {
   isIncluded: boolean;
 }
 
-interface Lab3ExpertRow {
-  choices: string[];
-}
-
-interface PermutationResult {
+interface ExpertRankingRow {
+  expert: string;
   ranking: string[];
-  sumDistance: number;
 }
 
-interface EvolutionPopulationRow {
-  generation: number;
-  individual: number;
-  chromosome: string[];
-  sumDistance: number;
-  fitness: number;
-  isBest: boolean;
+interface EvolutionResult {
+  totalPermutations: number;
+  populationSize: number;
+  generations: number;
+  bestRanking: string[];
+  bestSumDistance: number;
+  topRankings: { ranking: string[]; sumDistance: number }[];
+  durationMs: number;
 }
 
 const lab1ScoreMap = {
@@ -90,59 +87,103 @@ const lab2ScoreMap = {
 
 const getHeuristicCode = (value: string) => getHeuristicByValue(value)?.code ?? value;
 
-const calculateHammingDistance = (ranking: string[], expertChoices: string[]) => {
-  const comparedRanking = ranking.slice(0, expertChoices.length);
-
-  return expertChoices.reduce(
-    (total, movie, index) => total + (comparedRanking[index] === movie ? 0 : 1),
-    0
-  );
-};
-
-const calculateSumHammingDistance = (ranking: string[], expertRows: Lab3ExpertRow[]) =>
-  expertRows.reduce(
-    (total, expertRow) => total + calculateHammingDistance(ranking, expertRow.choices),
-    0
-  );
-
-const calculateEvolutionFitness = (chromosome: string[], expertRows: Lab3ExpertRow[]) => {
-  const sumDistance = calculateSumHammingDistance(chromosome, expertRows);
-  const fitness = Number((1 / (1 + sumDistance)).toFixed(4));
-
-  return {
-    sumDistance,
-    fitness
-  };
-};
-
-const rotateChromosome = (chromosome: string[], shift: number) => {
-  if (chromosome.length === 0) {
-    return [];
+const shuffleWithSeed = (items: string[], seed: number) => {
+  const result = [...items];
+  let state = seed % 2147483647;
+  if (state <= 0) {
+    state += 2147483646;
   }
 
-  const offset = shift % chromosome.length;
-  return [...chromosome.slice(offset), ...chromosome.slice(0, offset)];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    state = (state * 48271) % 2147483647;
+    const swapIndex = state % (index + 1);
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+
+  return result;
 };
 
-const mutateChromosome = (chromosome: string[], generation: number) => {
+const generateExpertRankings = (candidates: string[], count: number): ExpertRankingRow[] =>
+  Array.from({ length: count }).map((_, index) => ({
+    expert: `Експерт ${index + 1}`,
+    ranking: shuffleWithSeed(candidates, 1000 + index * 37)
+  }));
+
+const calculateHammingDistanceFull = (ranking: string[], expertRanking: string[]) =>
+  ranking.reduce((total, movie, index) => total + (expertRanking[index] === movie ? 0 : 1), 0);
+
+const calculateSumHammingAgainstExperts = (ranking: string[], expertRankings: ExpertRankingRow[]) =>
+  expertRankings.reduce(
+    (total, expertRow) => total + calculateHammingDistanceFull(ranking, expertRow.ranking),
+    0
+  );
+
+const factorial = (value: number) => {
+  let result = 1;
+  for (let i = 2; i <= value; i += 1) {
+    result *= i;
+  }
+  return result;
+};
+
+const mutateChromosome = (chromosome: string[]) => {
   if (chromosome.length < 2) {
     return chromosome;
   }
 
   const mutated = [...chromosome];
-  const leftIndex = generation % chromosome.length;
-  const rightIndex = (generation + 2) % chromosome.length;
+  const leftIndex = Math.floor(Math.random() * mutated.length);
+  let rightIndex = Math.floor(Math.random() * mutated.length);
+  if (rightIndex === leftIndex) {
+    rightIndex = (rightIndex + 1) % mutated.length;
+  }
 
   [mutated[leftIndex], mutated[rightIndex]] = [mutated[rightIndex], mutated[leftIndex]];
-
   return mutated;
 };
 
-const deduplicatePopulation = (population: string[][]) =>
-  population.filter(
-    (chromosome, index, collection) =>
-      collection.findIndex((item) => item.join('|') === chromosome.join('|')) === index
-  );
+const tournamentSelect = (
+  population: { chromosome: string[]; sumDistance: number }[],
+  tournamentSize: number
+) => {
+  let best = population[Math.floor(Math.random() * population.length)];
+
+  for (let i = 1; i < tournamentSize; i += 1) {
+    const candidate = population[Math.floor(Math.random() * population.length)];
+    if (candidate.sumDistance < best.sumDistance) {
+      best = candidate;
+    }
+  }
+
+  return best;
+};
+
+const generatePermutations = (items: string[]) => {
+  const result: string[][] = [];
+  const working = [...items];
+  const c = new Array(working.length).fill(0);
+
+  result.push([...working]);
+  let i = 0;
+
+  while (i < working.length) {
+    if (c[i] < i) {
+      if (i % 2 === 0) {
+        [working[0], working[i]] = [working[i], working[0]];
+      } else {
+        [working[c[i]], working[i]] = [working[i], working[c[i]]];
+      }
+      result.push([...working]);
+      c[i] += 1;
+      i = 0;
+    } else {
+      c[i] = 0;
+      i += 1;
+    }
+  }
+
+  return result;
+};
 
 const matchesHeuristic = (row: StructureRow, code: string) => {
   switch (code) {
@@ -165,96 +206,16 @@ const matchesHeuristic = (row: StructureRow, code: string) => {
   }
 };
 
-function MatrixTable({
-  title,
-  candidates,
-  matrix
-}: {
-  title: string;
-  candidates: string[];
-  matrix: number[][];
-}) {
-  return (
-    <section className={styles.section}>
-      <h2 className={styles.sectionTitle}>{title}</h2>
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>Об&apos;єкт</th>
-              {candidates.map((candidate) => (
-                <th key={candidate}>{candidate}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {candidates.map((candidate, rowIndex) => (
-              <tr key={candidate}>
-                <td>{candidate}</td>
-                {matrix[rowIndex].map((value, columnIndex) => (
-                  <td key={`${candidate}-${candidates[columnIndex]}`}>{value}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function ExpertRankMatrixTable({
-  title,
-  candidates,
-  experts,
-  matrix
-}: {
-  title: string;
-  candidates: string[];
-  experts: string[];
-  matrix: number[][];
-}) {
-  return (
-    <section className={styles.section}>
-      <h2 className={styles.sectionTitle}>{title}</h2>
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>Об&apos;єкт</th>
-              {experts.map((expert, index) => (
-                <th key={expert}>{index + 1}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {candidates.map((candidate, rowIndex) => (
-              <tr key={candidate}>
-                <td>{candidate}</td>
-                {matrix[rowIndex].map((value, columnIndex) => (
-                  <td key={`${candidate}-${experts[columnIndex]}`}>{value}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className={styles.sectionText}>
-        Нумерація стовпців відповідає порядку експертів у протоколі ЛР1. `1`, `2`, `3` показують
-        місце об&apos;єкта в експерта, `0` означає, що об&apos;єкт не потрапив до його трійки.
-      </p>
-    </section>
-  );
-}
-
 export default function Admin() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [votes, setVotes] = useState<VoteRow[]>([]);
   const [lab2Votes, setLab2Votes] = useState<Lab2VoteRow[]>([]);
-  const [activeLab, setActiveLab] = useState<'lab1' | 'lab2' | 'lab3'>('lab1');
+  const [activeLab, setActiveLab] = useState<'lab1' | 'lab2'>('lab1');
   const [message, setMessage] = useState('');
+  const [evolutionResult, setEvolutionResult] = useState<EvolutionResult | null>(null);
+  const [isEvolutionRunning, setIsEvolutionRunning] = useState(false);
 
   useEffect(() => {
     if (!isLoggedIn) {
@@ -433,205 +394,117 @@ export default function Admin() {
     [lab2Analysis.topHeuristics, ratingRows, structureRows]
   );
 
-  const lab2EvolutionAnalysis = useMemo(() => {
-    const candidates = lab2Analysis.finalSubset.map((row) => row.movie);
+  const lab2FinalCandidates = useMemo(
+    () => lab2Analysis.finalSubset.map((row) => row.movie),
+    [lab2Analysis.finalSubset]
+  );
 
-    const expertRows: Lab3ExpertRow[] = votes
-      .map((vote) => ({
-        choices: [vote.first_place, vote.second_place, vote.third_place]
-      }))
-      .filter((row) => row.choices.length > 0);
+  const lab2ExpertRankings = useMemo(
+    () => generateExpertRankings(lab2FinalCandidates, 15),
+    [lab2FinalCandidates]
+  );
 
-    if (candidates.length === 0) {
-      return {
-        candidates,
-        expertRows,
-        finalPopulationRows: [] as EvolutionPopulationRow[]
-      };
+  const runEvolutionSearch = async () => {
+    if (lab2FinalCandidates.length === 0) {
+      setEvolutionResult(null);
+      return;
     }
 
-    const defaultOrder = [...candidates];
-    const reverseOrder = [...candidates].reverse();
-    const targetPopulationSize = 100;
-    const survivorCount = Math.max(2, Math.ceil(targetPopulationSize / 4));
-    const totalGenerations = 50;
-
-    const initialPopulationPool: string[][] = [defaultOrder, reverseOrder];
-
-    for (let shift = 1; shift < candidates.length; shift += 1) {
-      initialPopulationPool.push(rotateChromosome(defaultOrder, shift));
-      initialPopulationPool.push(rotateChromosome(reverseOrder, shift));
+    if (lab2FinalCandidates.length !== 8) {
+      setEvolutionResult(null);
+      return;
     }
 
-    initialPopulationPool.push(mutateChromosome(defaultOrder, 1));
-    initialPopulationPool.push(mutateChromosome(reverseOrder, 2));
+    if (lab2ExpertRankings.length === 0) {
+      setEvolutionResult(null);
+      return;
+    }
 
-    let population = deduplicatePopulation(initialPopulationPool).slice(0, targetPopulationSize);
+    setIsEvolutionRunning(true);
+    setEvolutionResult(null);
+    const start = Date.now();
+    const totalPermutations = factorial(lab2FinalCandidates.length);
+    const populationSize = totalPermutations;
+    const generations = 20;
+    const tournamentSize = 3;
+    const mutationRate = 0.35;
 
-    const populationRows: EvolutionPopulationRow[] = [];
+    let population = generatePermutations(lab2FinalCandidates);
 
-    for (let generation = 1; generation <= totalGenerations; generation += 1) {
-      const rankedPopulation = population
-        .map((chromosome) => ({
-          chromosome,
-          ...calculateEvolutionFitness(chromosome, expertRows)
-        }))
-        .sort(
-          (left, right) => right.fitness - left.fitness || left.sumDistance - right.sumDistance
-        );
+    const evaluatePopulation = async (current: string[][]) => {
+      const chunkSize = 1000;
+      const chunks: string[][][] = [];
 
-      rankedPopulation.forEach((candidate, index) => {
-        populationRows.push({
-          generation,
-          individual: index + 1,
-          chromosome: candidate.chromosome,
-          sumDistance: candidate.sumDistance,
-          fitness: candidate.fitness,
-          isBest: index === 0
-        });
-      });
-
-      const survivors = rankedPopulation.slice(0, survivorCount);
-      const nextPopulationPool = survivors.map((item) => item.chromosome);
-
-      while (nextPopulationPool.length < targetPopulationSize) {
-        const parentIndex = nextPopulationPool.length % survivors.length;
-        const parent = survivors[parentIndex]?.chromosome ?? survivors[0].chromosome;
-        const mutationSeed = generation + nextPopulationPool.length;
-
-        nextPopulationPool.push(mutateChromosome(parent, mutationSeed));
-        nextPopulationPool.push(rotateChromosome(parent, mutationSeed));
+      for (let index = 0; index < current.length; index += chunkSize) {
+        chunks.push(current.slice(index, index + chunkSize));
       }
 
-      population = deduplicatePopulation(nextPopulationPool).slice(0, targetPopulationSize);
+      const evaluatedChunks = await Promise.all(
+        chunks.map(
+          (chunk) =>
+            new Promise<{ chromosome: string[]; sumDistance: number }[]>((resolve) => {
+              setTimeout(() => {
+                const evaluated = chunk.map((chromosome) => ({
+                  chromosome,
+                  sumDistance: calculateSumHammingAgainstExperts(chromosome, lab2ExpertRankings)
+                }));
+                resolve(evaluated);
+              }, 0);
+            })
+        )
+      );
 
-      if (population.length < targetPopulationSize) {
-        const fallbackPopulation = [...population];
+      return evaluatedChunks.flat();
+    };
 
-        for (let shift = 1; fallbackPopulation.length < targetPopulationSize; shift += 1) {
-          fallbackPopulation.push(rotateChromosome(defaultOrder, shift));
-          fallbackPopulation.push(mutateChromosome(reverseOrder, generation + shift));
+    let evaluated = await evaluatePopulation(population);
+    let best = evaluated[0];
+    let globalTop: { ranking: string[]; sumDistance: number }[] = [];
+
+    for (let gen = 1; gen <= generations; gen += 1) {
+      for (let i = 1; i < evaluated.length; i += 1) {
+        if (evaluated[i].sumDistance < best.sumDistance) {
+          best = evaluated[i];
         }
-
-        population = deduplicatePopulation(fallbackPopulation).slice(0, targetPopulationSize);
       }
+
+      const currentTop = [...evaluated]
+        .sort((left, right) => left.sumDistance - right.sumDistance)
+        .slice(0, 40)
+        .map((item) => ({ ranking: item.chromosome, sumDistance: item.sumDistance }));
+
+      globalTop = [...globalTop, ...currentTop]
+        .sort((left, right) => left.sumDistance - right.sumDistance)
+        .filter(
+          (item, index, collection) =>
+            collection.findIndex((row) => row.ranking.join('|') === item.ranking.join('|')) ===
+            index
+        )
+        .slice(0, 40);
+
+      const nextPopulation: string[][] = [];
+      while (nextPopulation.length < populationSize) {
+        const parent = tournamentSelect(evaluated, tournamentSize);
+        const child =
+          Math.random() < mutationRate ? mutateChromosome(parent.chromosome) : parent.chromosome;
+        nextPopulation.push(child);
+      }
+
+      population = nextPopulation;
+      evaluated = await evaluatePopulation(population);
     }
 
-    return {
-      candidates,
-      expertRows,
-      finalPopulationRows: populationRows.filter((row) => row.generation === totalGenerations)
-    };
-  }, [lab2Analysis.finalSubset, votes]);
-
-  const lab3Analysis = useMemo(() => {
-    const candidates = lab2Analysis.finalSubset.map((row) => row.movie);
-    const experts = votes.map((vote) => vote.expert);
-
-    const expertRows: Lab3ExpertRow[] = votes
-      .map((vote) => ({
-        choices: [vote.first_place, vote.second_place, vote.third_place]
-      }))
-      .filter((row) => row.choices.length > 0);
-
-    const expertRankMatrix = candidates.map((candidate) =>
-      votes.map((vote) => {
-        if (vote.first_place === candidate) {
-          return 1;
-        }
-
-        if (vote.second_place === candidate) {
-          return 2;
-        }
-
-        if (vote.third_place === candidate) {
-          return 3;
-        }
-
-        return 0;
-      })
-    );
-
-    const preferenceMatrix = candidates.map((leftCandidate) =>
-      candidates.map((rightCandidate) => {
-        if (leftCandidate === rightCandidate) {
-          return 0;
-        }
-
-        return expertRows.reduce((total, row) => {
-          const leftIndex = row.choices.indexOf(leftCandidate);
-          const rightIndex = row.choices.indexOf(rightCandidate);
-
-          if (leftIndex !== -1 && rightIndex !== -1) {
-            return leftIndex < rightIndex ? total + 1 : total;
-          }
-
-          if (leftIndex !== -1 && rightIndex === -1) {
-            return total + 1;
-          }
-
-          return total;
-        }, 0);
-      })
-    );
-
-    const permutationSamples: PermutationResult[] = [];
-    const bestBySum: PermutationResult[] = [];
-    let minSum = Number.POSITIVE_INFINITY;
-
-    if (candidates.length > 0 && candidates.length <= 8) {
-      const working = [...candidates];
-
-      const evaluatePermutation = (ranking: string[]) => {
-        const sumDistance = calculateSumHammingDistance(ranking, expertRows);
-        const result = { ranking: [...ranking], sumDistance };
-
-        if (permutationSamples.length < 10) {
-          permutationSamples.push(result);
-        }
-
-        if (sumDistance < minSum) {
-          minSum = sumDistance;
-          bestBySum.length = 0;
-          bestBySum.push(result);
-        } else if (sumDistance === minSum && bestBySum.length < 5) {
-          bestBySum.push(result);
-        }
-      };
-
-      const generate = (n: number) => {
-        if (n === 1) {
-          evaluatePermutation(working);
-          return;
-        }
-
-        generate(n - 1);
-
-        for (let i = 0; i < n - 1; i += 1) {
-          if (n % 2 === 0) {
-            [working[i], working[n - 1]] = [working[n - 1], working[i]];
-          } else {
-            [working[0], working[n - 1]] = [working[n - 1], working[0]];
-          }
-
-          generate(n - 1);
-        }
-      };
-
-      generate(working.length);
-    }
-
-    return {
-      candidates,
-      experts,
-      expertRankMatrix,
-      preferenceMatrix,
-      permutationSamples,
-      bestBySum,
-      canEnumerate: candidates.length > 0 && candidates.length <= 8
-    };
-  }, [lab2Analysis.finalSubset, votes]);
-
+    setEvolutionResult({
+      totalPermutations,
+      populationSize,
+      generations,
+      bestRanking: best.chromosome,
+      bestSumDistance: best.sumDistance,
+      topRankings: globalTop,
+      durationMs: Date.now() - start
+    });
+    setIsEvolutionRunning(false);
+  };
   if (!isLoggedIn) {
     return (
       <div className={baseStyles.page}>
@@ -695,13 +568,6 @@ export default function Admin() {
               onClick={() => setActiveLab('lab2')}
             >
               Лаб2
-            </button>
-            <button
-              type='button'
-              className={`${styles.navButton} ${activeLab === 'lab3' ? styles.navButtonActive : ''}`}
-              onClick={() => setActiveLab('lab3')}
-            >
-              Лаб3
             </button>
           </div>
           <button
@@ -957,19 +823,7 @@ export default function Admin() {
             </section>
 
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>
-                Фінальна підмножина після ЛР2 та еволюційні стратегії
-              </h2>
-              <p className={styles.sectionText}>
-                Еволюційні стратегії оцінюють хромосоми через відстань Хемінга відносно експертних
-                трійок. Для кожного експерта його повна трійка напряму порівнюється з першими трьома
-                позиціями хромосоми без попередньої фільтрації. Для порівняння популяції
-                використовується `Сума відстаней Хемінга`, а fitness-функція знову обчислюється як
-                `1 / (1 + sumDistance)`. Найкращими вважаються хромосоми з найбільшим значенням
-                `fitness`, що відповідає найменшому значенню `sumDistance`. Нова популяція
-                формується без схрещування: лише через відбір найкращих особин, мутації та циклічні
-                зсуви.
-              </p>
+              <h2 className={styles.sectionTitle}>Фінальна підмножина після евристик</h2>
 
               <div className={styles.tableWrap}>
                 <table className={styles.table}>
@@ -980,8 +834,8 @@ export default function Admin() {
                     </tr>
                   </thead>
                   <tbody>
-                    {lab2EvolutionAnalysis.candidates.length > 0 ? (
-                      lab2EvolutionAnalysis.candidates.map((movie, index) => (
+                    {lab2FinalCandidates.length > 0 ? (
+                      lab2FinalCandidates.map((movie, index) => (
                         <tr key={movie}>
                           <td>{index + 1}</td>
                           <td>{movie}</td>
@@ -997,167 +851,72 @@ export default function Admin() {
                   </tbody>
                 </table>
               </div>
-
-              <div className={styles.subSection}>
-                <h3 className={styles.subTitle}>Фінальна популяція</h3>
-                <div className={styles.tableWrap}>
-                  <table className={styles.table}>
-                    <thead>
-                      <tr>
-                        <th>Особина</th>
-                        <th>Хромосома</th>
-                        <th>Сума відстаней Хемінга</th>
-                        <th>Fitness</th>
-                        <th>Статус</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lab2EvolutionAnalysis.finalPopulationRows.length > 0 ? (
-                        lab2EvolutionAnalysis.finalPopulationRows.map((row) => (
-                          <tr
-                            key={`${row.generation}-${row.individual}-${row.chromosome.join('|')}`}
-                          >
-                            <td>{row.individual}</td>
-                            <td className={styles.sequenceCell}>{row.chromosome.join(' > ')}</td>
-                            <td>{row.sumDistance}</td>
-                            <td>{row.fitness}</td>
-                            <td>{row.isBest ? 'Найкраща в поколінні' : 'Популяція'}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={5} className={`${styles.centerCell} ${styles.muted}`}>
-                            Фінальна популяція ще не сформована
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </section>
-          </>
-        ) : (
-          <>
-            <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Лабораторна 3 - перелік об&apos;єктів</h2>
-              <p className={styles.sectionText}>
-                До ЛР3 передається фінальна підмножина переможців після ЛР2.
-              </p>
-              <div className={styles.tableWrap}>
-                <table className={styles.table}>
-                  <thead>
-                    <tr>
-                      <th>№</th>
-                      <th>Об&apos;єкт</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lab3Analysis.candidates.length > 0 ? (
-                      lab3Analysis.candidates.map((candidate, index) => (
-                        <tr key={candidate}>
-                          <td>{index + 1}</td>
-                          <td>{candidate}</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={2} className={`${styles.centerCell} ${styles.muted}`}>
-                          Після ЛР2 немає підмножини для ранжування
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
             </section>
 
-            <ExpertRankMatrixTable
-              title='Лабораторна 3 - ранги за множинними порівняннями'
-              candidates={lab3Analysis.candidates}
-              experts={lab3Analysis.experts}
-              matrix={lab3Analysis.expertRankMatrix}
-            />
-
-            <MatrixTable
-              title='Лабораторна 3 - матриця статистики переваг'
-              candidates={lab3Analysis.candidates}
-              matrix={lab3Analysis.preferenceMatrix}
-            />
-
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>
-                Лабораторна 3 - перевірка кількох перестановок
-              </h2>
-              <p className={styles.sectionText}>
-                Для кожної перестановки обчислюється тільки сума відстаней Хемінга до експертних
-                трійок.
-              </p>
-              {lab3Analysis.canEnumerate ? (
+              <h2 className={styles.sectionTitle}>Ранжування 15 експертів</h2>
+              {lab2ExpertRankings.length > 0 ? (
                 <div className={styles.tableWrap}>
-                  <table className={styles.table}>
-                    <thead>
-                      <tr>
-                        <th>Перестановка</th>
-                        <th>Сума відстаней Хемінга</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lab3Analysis.permutationSamples.map((sample, index) => (
-                        <tr key={`${sample.ranking.join('|')}-${index}`}>
-                          <td>{sample.ranking.join(' > ')}</td>
-                          <td>{sample.sumDistance}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  {lab2ExpertRankings.map((row) => (
+                    <p key={row.expert} className={styles.sectionText}>
+                      {row.expert}: {row.ranking.join(' > ')}
+                    </p>
+                  ))}
                 </div>
               ) : (
-                <p className={styles.sectionText}>
-                  Прямий перебір наразі запускається для підмножини до 8 об&apos;єктів, щоб не
-                  блокувати інтерфейс браузера. Зараз у підмножині {lab3Analysis.candidates.length}{' '}
-                  об&apos;єктів.
+                <p className={`${styles.sectionText} ${styles.muted}`}>
+                  Немає даних для ранжування експертів
                 </p>
               )}
             </section>
 
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Лабораторна 3 - колективне ранжування</h2>
-              {lab3Analysis.canEnumerate ? (
-                <>
+              <h2 className={styles.sectionTitle}>Еволюційні стратегії</h2>
+              <button
+                type='button'
+                className={baseStyles.button}
+                onClick={runEvolutionSearch}
+                disabled={isEvolutionRunning || lab2FinalCandidates.length !== 8}
+              >
+                {isEvolutionRunning ? 'Розрахунок...' : 'Запустити алгоритм'}
+              </button>
+              {lab2FinalCandidates.length !== 8 && (
+                <p className={`${styles.sectionText} ${styles.muted}`}>
+                  Для запуску потрібно рівно 8 об&apos;єктів у фінальній підмножині.
+                </p>
+              )}
+              {evolutionResult && (
+                <div className={styles.subSection}>
+                  <h3 className={styles.subTitle}>Найкраща перестановка</h3>
                   <p className={styles.sectionText}>
-                    Нижче наведено перестановки, що дають найменшу суму відстаней Хемінга.
+                    Ранжування: {evolutionResult.bestRanking.join(' > ')}
                   </p>
+                  <p className={styles.sectionText}>
+                    Сума відстаней Хемінга: {evolutionResult.bestSumDistance}
+                  </p>
+                  <p className={styles.sectionText}>
+                    Розмір популяції: {evolutionResult.populationSize}
+                  </p>
+                  <p className={styles.sectionText}>
+                    Кількість поколінь: {evolutionResult.generations}
+                  </p>
+                </div>
+              )}
+              {evolutionResult && evolutionResult.topRankings.length > 0 && (
+                <div className={styles.subSection}>
+                  <h3 className={styles.subTitle}>Топ-40 перестановок</h3>
                   <div className={styles.tableWrap}>
-                    <table className={styles.table}>
-                      <thead>
-                        <tr>
-                          <th>Критерій</th>
-                          <th>Ранжування</th>
-                          <th>Сума відстаней Хемінга</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {lab3Analysis.bestBySum.map((result, index) => (
-                          <tr key={`sum-${result.ranking.join('|')}-${index}`}>
-                            <td>Мінімум суми</td>
-                            <td>{result.ranking.join(' > ')}</td>
-                            <td>{result.sumDistance}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    {evolutionResult.topRankings.map((row, index) => (
+                      <p key={`${row.ranking.join('|')}-${index}`} className={styles.sectionText}>
+                        {index + 1}. {row.ranking.join(' > ')} (ΣH = {row.sumDistance})
+                      </p>
+                    ))}
                   </div>
-                </>
-              ) : (
-                <p className={styles.sectionText}>
-                  Для прямого перебору спершу потрібно зменшити підмножину до 8 або менше
-                  об&apos;єктів. Решта підготовчих розрахунків уже доступна в цій вкладці.
-                </p>
+                </div>
               )}
             </section>
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );
