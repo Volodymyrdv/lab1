@@ -100,6 +100,14 @@ interface ExhaustiveRankingResult {
   maxDistance: number;
 }
 
+interface Lab3ExhaustiveSearchResult {
+  totalPermutations: number;
+  minSumBest: ExhaustiveRankingResult;
+  minSumTop: ExhaustiveRankingResult[];
+  minMaxBest: ExhaustiveRankingResult;
+  minMaxTop: ExhaustiveRankingResult[];
+}
+
 interface Lab3EvolutionResult {
   objective: 'min-sum' | 'min-max';
   totalPermutations: number;
@@ -536,7 +544,7 @@ export default function Admin() {
     }));
   }, [lab2ExpertRankings, lab2FinalCandidates]);
 
-  const lab3ExhaustiveSearch = useMemo(() => {
+  const lab3ExhaustiveSearch = useMemo<Lab3ExhaustiveSearchResult | null>(() => {
     if (lab2FinalCandidates.length !== 8 || lab2ExpertRankings.length === 0) {
       return null;
     }
@@ -602,6 +610,10 @@ export default function Admin() {
         10
       );
     });
+
+    if (!minSumBest || !minMaxBest) {
+      return null;
+    }
 
     return {
       totalPermutations: permutations.length,
@@ -1468,7 +1480,7 @@ export default function Admin() {
 
             <section className={styles.section}>
               <h2 className={styles.sectionTitle}>Пошук мінімальної суми відстаней</h2>
-              {lab3ExhaustiveSearch?.minSumBest ? (
+              {lab3ExhaustiveSearch ? (
                 <>
                   <p className={styles.sectionText}>
                     Перебрано всіх перестановок: {lab3ExhaustiveSearch.totalPermutations}
@@ -1486,7 +1498,7 @@ export default function Admin() {
                     <p className={styles.sectionText}>
                       Відстані до експертів:{' '}
                       {lab3ExhaustiveSearch.minSumBest.distances
-                        .map((distance, index) => `Е${index + 1}=${distance}`)
+                        .map((distance: number, index: number) => `Е${index + 1}=${distance}`)
                         .join(', ')}
                     </p>
                   </div>
@@ -1528,7 +1540,7 @@ export default function Admin() {
 
             <section className={styles.section}>
               <h2 className={styles.sectionTitle}>Пошук мінімуму максимумів MinMax</h2>
-              {lab3ExhaustiveSearch?.minMaxBest ? (
+              {lab3ExhaustiveSearch ? (
                 <>
                   <p className={styles.sectionText}>
                     Перебрано всіх перестановок: {lab3ExhaustiveSearch.totalPermutations}
@@ -1546,7 +1558,7 @@ export default function Admin() {
                     <p className={styles.sectionText}>
                       Відстані до експертів:{' '}
                       {lab3ExhaustiveSearch.minMaxBest.distances
-                        .map((distance, index) => `Е${index + 1}=${distance}`)
+                        .map((distance: number, index: number) => `Е${index + 1}=${distance}`)
                         .join(', ')}
                     </p>
                   </div>
