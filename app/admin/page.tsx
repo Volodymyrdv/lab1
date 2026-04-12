@@ -132,6 +132,24 @@ const lab2ScoreMap = {
   third_choice: 1
 } as const;
 
+const lab4PreviewRankings = [
+  'Скажене весілля > The Avengers > Forrest Gump > Joker > Inception > Avengers: Endgame > Gladiator > The Shawshank Redemption',
+  'Forrest Gump > Joker > Gladiator > The Shawshank Redemption > Avengers: Endgame > Скажене весілля > The Avengers > Inception',
+  'The Avengers > Forrest Gump > Avengers: Endgame > Скажене весілля > Joker > Inception > The Shawshank Redemption > Gladiator',
+  'The Shawshank Redemption > The Avengers > Inception > Avengers: Endgame > Forrest Gump > Gladiator > Joker > Скажене весілля',
+  'Forrest Gump > Gladiator > The Avengers > Inception > Avengers: Endgame > The Shawshank Redemption > Скажене весілля > Joker',
+  'Joker > Gladiator > Скажене весілля > The Shawshank Redemption > Inception > Forrest Gump > Avengers: Endgame > The Avengers',
+  'Inception > Avengers: Endgame > Gladiator > The Shawshank Redemption > Скажене весілля > Joker > The Avengers > Forrest Gump',
+  'Forrest Gump > Inception > The Shawshank Redemption > Скажене весілля > Joker > Gladiator > The Avengers > Avengers: Endgame',
+  'The Avengers > Inception > Avengers: Endgame > Joker > Gladiator > Скажене весілля > Forrest Gump > The Shawshank Redemption',
+  'Joker > Скажене весілля > Forrest Gump > Avengers: Endgame > The Shawshank Redemption > The Avengers > Gladiator > Inception',
+  'Forrest Gump > Скажене весілля > Joker > The Shawshank Redemption > The Avengers > Avengers: Endgame > Inception > Gladiator',
+  'Inception > Forrest Gump > Joker > Avengers: Endgame > The Avengers > Gladiator > The Shawshank Redemption > Скажене весілля',
+  'The Shawshank Redemption > Inception > Avengers: Endgame > Скажене весілля > Gladiator > Forrest Gump > The Avengers > Joker',
+  'Inception > Gladiator > The Shawshank Redemption > Avengers: Endgame > Forrest Gump > Joker > Скажене весілля > The Avengers',
+  'Gladiator > The Avengers > Скажене весілля > Inception > Avengers: Endgame > The Shawshank Redemption > Joker > Forrest Gump'
+];
+
 const getHeuristicCode = (value: string) => getHeuristicByValue(value)?.code ?? value;
 
 const shuffleWithSeed = (items: string[], seed: number) => {
@@ -280,13 +298,15 @@ export default function Admin() {
   const [password, setPassword] = useState('');
   const [votes, setVotes] = useState<VoteRow[]>([]);
   const [lab2Votes, setLab2Votes] = useState<Lab2VoteRow[]>([]);
-  const [activeLab, setActiveLab] = useState<'lab1' | 'lab2' | 'lab3'>('lab1');
+  const [activeLab, setActiveLab] = useState<'lab1' | 'lab2' | 'lab3' | 'lab4'>('lab1');
   const [message, setMessage] = useState('');
   const [evolutionResult, setEvolutionResult] = useState<EvolutionResult | null>(null);
   const [isEvolutionRunning, setIsEvolutionRunning] = useState(false);
   const [lab3FitnessMode, setLab3FitnessMode] = useState<'min-sum' | 'min-max'>('min-sum');
   const [lab3EvolutionResult, setLab3EvolutionResult] = useState<Lab3EvolutionResult | null>(null);
   const [isLab3EvolutionRunning, setIsLab3EvolutionRunning] = useState(false);
+  const [isLab4RankingVisible, setIsLab4RankingVisible] = useState(true);
+  const [isLab4SubsetVisible, setIsLab4SubsetVisible] = useState(true);
 
   useEffect(() => {
     if (!isLoggedIn) {
@@ -968,6 +988,13 @@ export default function Admin() {
               onClick={() => setActiveLab('lab3')}
             >
               Лаб3
+            </button>
+            <button
+              type='button'
+              className={`${styles.navButton} ${activeLab === 'lab4' ? styles.navButtonActive : ''}`}
+              onClick={() => setActiveLab('lab4')}
+            >
+              Лаб4
             </button>
           </div>
           <button
@@ -1665,6 +1692,79 @@ export default function Admin() {
                       {index + 1}. {row.ranking.join(' > ')} (сума = {row.sumDistance}, max ={' '}
                       {row.maxDistance})
                     </p>
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        ) : activeLab === 'lab4' ? (
+          <>
+            <section className={styles.section}>
+              <div className={styles.blockHeader}>
+                <h2 className={styles.sectionTitle}>Фінальна підмножина після евристик</h2>
+                <button
+                  type='button'
+                  className={styles.toggleButton}
+                  onClick={() => setIsLab4SubsetVisible((current) => !current)}
+                >
+                  {isLab4SubsetVisible ? 'Приховати блок' : 'Показати блок'}
+                </button>
+              </div>
+
+              {isLab4SubsetVisible && (
+                <div className={styles.tableWrap}>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th>№</th>
+                        <th>Фільм</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lab2FinalCandidates.length > 0 ? (
+                        lab2FinalCandidates.map((movie, index) => (
+                          <tr key={`lab4-subset-${movie}`}>
+                            <td>{index + 1}</td>
+                            <td>{movie}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={2} className={`${styles.centerCell} ${styles.muted}`}>
+                            Після застосування евристик об&apos;єкти не залишилися
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
+            <section className={styles.section}>
+              <div className={styles.blockHeader}>
+                <h2 className={styles.sectionTitle}>Ранжування 15 експертів</h2>
+                <button
+                  type='button'
+                  className={styles.toggleButton}
+                  onClick={() => setIsLab4RankingVisible((current) => !current)}
+                >
+                  {isLab4RankingVisible ? 'Приховати блок' : 'Показати блок'}
+                </button>
+              </div>
+
+              {isLab4RankingVisible && (
+                <div className={styles.expertRankingGrid}>
+                  {lab4PreviewRankings.map((ranking, index) => (
+                    <article
+                      key={`lab4-preview-${index + 1}`}
+                      className={styles.expertRankingCard}
+                    >
+                      <div className={styles.expertRankingHeader}>
+                        <span className={styles.expertRankingBadge}>Експерт {index + 1}</span>
+                      </div>
+                      <p className={styles.expertRankingText}>{ranking}</p>
+                    </article>
                   ))}
                 </div>
               )}
