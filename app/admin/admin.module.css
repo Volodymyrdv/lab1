@@ -260,6 +260,74 @@
   background: linear-gradient(180deg, #ffffff 0%, #faf5ff 100%);
 }
 
+.infoGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.infoCard {
+  padding: 16px;
+  border: 1px solid #dcc6ff;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(168, 85, 247, 0.14), transparent 34%),
+    linear-gradient(180deg, #ffffff 0%, #fbf7ff 100%);
+  box-shadow: 0 8px 16px rgba(138, 43, 226, 0.08);
+}
+
+.infoLabel {
+  display: inline-block;
+  margin-bottom: 10px;
+  color: #6d28d9;
+  font-size: 0.86rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.infoValue {
+  display: block;
+  color: #382f4d;
+  font-size: 1.2rem;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.infoMeta {
+  display: block;
+  margin-top: 10px;
+  color: #6f6484;
+  line-height: 1.5;
+}
+
+.cardTitle {
+  display: block;
+  color: #382f4d;
+  font-size: 1rem;
+  line-height: 1.7;
+  font-weight: 700;
+}
+
+.noteCard {
+  margin-top: 16px;
+  padding: 16px 18px;
+  border-left: 4px solid #8a2be2;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fcf8ff 0%, #f6edff 100%);
+}
+
+.inlineFormula {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #f2e7ff;
+  color: #6d28d9;
+  font-weight: 700;
+}
+
 .expertRankingGrid {
   display: grid;
   gap: 14px;

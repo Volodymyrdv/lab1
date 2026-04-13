@@ -120,6 +120,32 @@ interface Lab3EvolutionResult {
   durationMs: number;
 }
 
+interface DistributedChunkResult {
+  workerId: number;
+  fixedFirstMovie: string;
+  permutationCount: number;
+  minSumBest: ExhaustiveRankingResult;
+  minMaxBest: ExhaustiveRankingResult;
+}
+
+interface DistributedSearchResult {
+  inputSignature: string;
+  workerCount: number;
+  permutationsPerWorker: number;
+  totalPermutations: number;
+  chunks: DistributedChunkResult[];
+  globalMinSum: ExhaustiveRankingResult;
+  globalMinMax: ExhaustiveRankingResult;
+  matchesLab3MinSum: boolean;
+  matchesLab3MinMax: boolean;
+}
+
+interface Lab4ChosenCompromise {
+  ranking: string[];
+  objectVector: number[];
+  rankVector: number[];
+}
+
 const lab1ScoreMap = {
   first_place: 3,
   second_place: 2,
@@ -131,24 +157,6 @@ const lab2ScoreMap = {
   second_choice: 2,
   third_choice: 1
 } as const;
-
-const lab4PreviewRankings = [
-  'Скажене весілля > The Avengers > Forrest Gump > Joker > Inception > Avengers: Endgame > Gladiator > The Shawshank Redemption',
-  'Forrest Gump > Joker > Gladiator > The Shawshank Redemption > Avengers: Endgame > Скажене весілля > The Avengers > Inception',
-  'The Avengers > Forrest Gump > Avengers: Endgame > Скажене весілля > Joker > Inception > The Shawshank Redemption > Gladiator',
-  'The Shawshank Redemption > The Avengers > Inception > Avengers: Endgame > Forrest Gump > Gladiator > Joker > Скажене весілля',
-  'Forrest Gump > Gladiator > The Avengers > Inception > Avengers: Endgame > The Shawshank Redemption > Скажене весілля > Joker',
-  'Joker > Gladiator > Скажене весілля > The Shawshank Redemption > Inception > Forrest Gump > Avengers: Endgame > The Avengers',
-  'Inception > Avengers: Endgame > Gladiator > The Shawshank Redemption > Скажене весілля > Joker > The Avengers > Forrest Gump',
-  'Forrest Gump > Inception > The Shawshank Redemption > Скажене весілля > Joker > Gladiator > The Avengers > Avengers: Endgame',
-  'The Avengers > Inception > Avengers: Endgame > Joker > Gladiator > Скажене весілля > Forrest Gump > The Shawshank Redemption',
-  'Joker > Скажене весілля > Forrest Gump > Avengers: Endgame > The Shawshank Redemption > The Avengers > Gladiator > Inception',
-  'Forrest Gump > Скажене весілля > Joker > The Shawshank Redemption > The Avengers > Avengers: Endgame > Inception > Gladiator',
-  'Inception > Forrest Gump > Joker > Avengers: Endgame > The Avengers > Gladiator > The Shawshank Redemption > Скажене весілля',
-  'The Shawshank Redemption > Inception > Avengers: Endgame > Скажене весілля > Gladiator > Forrest Gump > The Avengers > Joker',
-  'Inception > Gladiator > The Shawshank Redemption > Avengers: Endgame > Forrest Gump > Joker > Скажене весілля > The Avengers',
-  'Gladiator > The Avengers > Скажене весілля > Inception > Avengers: Endgame > The Shawshank Redemption > Joker > Forrest Gump'
-];
 
 const getHeuristicCode = (value: string) => getHeuristicByValue(value)?.code ?? value;
 
@@ -305,6 +313,10 @@ export default function Admin() {
   const [lab3FitnessMode, setLab3FitnessMode] = useState<'min-sum' | 'min-max'>('min-sum');
   const [lab3EvolutionResult, setLab3EvolutionResult] = useState<Lab3EvolutionResult | null>(null);
   const [isLab3EvolutionRunning, setIsLab3EvolutionRunning] = useState(false);
+  const [lab4DistributedSearch, setLab4DistributedSearch] = useState<DistributedSearchResult | null>(
+    null
+  );
+  const [isLab4DistributedRunning, setIsLab4DistributedRunning] = useState(false);
   const [isLab4RankingVisible, setIsLab4RankingVisible] = useState(true);
   const [isLab4SubsetVisible, setIsLab4SubsetVisible] = useState(true);
 
@@ -644,6 +656,30 @@ export default function Admin() {
     };
   }, [lab2ExpertRankings, lab2FinalCandidates]);
 
+  const lab4DistributedInputSignature = useMemo(
+    () => `${lab2FinalCandidates.join('|')}::${lab2ExpertRankings.map((row) => row.ranking.join('|')).join('::')}`,
+    [lab2ExpertRankings, lab2FinalCandidates]
+  );
+
+  const activeLab4DistributedSearch =
+    lab4DistributedSearch?.inputSignature === lab4DistributedInputSignature
+      ? lab4DistributedSearch
+      : null;
+
+  const lab4ChosenCompromise = useMemo<Lab4ChosenCompromise | null>(() => {
+    if (!activeLab4DistributedSearch) {
+      return null;
+    }
+
+    return {
+      ranking: activeLab4DistributedSearch.globalMinSum.ranking,
+      objectVector: activeLab4DistributedSearch.globalMinSum.ranking.map(
+        (movie) => lab2FinalCandidates.findIndex((candidate) => candidate === movie) + 1
+      ),
+      rankVector: activeLab4DistributedSearch.globalMinSum.ranking.map((_, index) => index + 1)
+    };
+  }, [activeLab4DistributedSearch, lab2FinalCandidates]);
+
   const runEvolutionSearch = async () => {
     if (lab2FinalCandidates.length === 0) {
       setEvolutionResult(null);
@@ -917,6 +953,118 @@ export default function Admin() {
       durationMs: Date.now() - start
     });
     setIsLab3EvolutionRunning(false);
+  };
+
+  const runLab4DistributedSearch = async () => {
+    if (!lab3ExhaustiveSearch || lab2FinalCandidates.length === 0 || lab2ExpertRankings.length === 0) {
+      setLab4DistributedSearch(null);
+      return;
+    }
+
+    setIsLab4DistributedRunning(true);
+    setLab4DistributedSearch(null);
+
+    const workerCount = lab2FinalCandidates.length;
+    const permutationsPerWorker = factorial(Math.max(lab2FinalCandidates.length - 1, 0));
+
+    const chunks: DistributedChunkResult[] = [];
+
+    for (const [workerIndex, fixedFirstMovie] of lab2FinalCandidates.entries()) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const tailCandidates = lab2FinalCandidates.filter((movie) => movie !== fixedFirstMovie);
+      const tailPermutations = generatePermutations(tailCandidates);
+      let minSumBest: ExhaustiveRankingResult | null = null;
+      let minMaxBest: ExhaustiveRankingResult | null = null;
+
+      tailPermutations.forEach((tailRanking) => {
+        const ranking = [fixedFirstMovie, ...tailRanking];
+        const distances = lab2ExpertRankings.map((expertRow) =>
+          calculateHammingDistanceFull(ranking, expertRow.ranking)
+        );
+        const sumDistance = distances.reduce((total, value) => total + value, 0);
+        const maxDistance = Math.max(...distances);
+        const candidate = {
+          ranking,
+          distances,
+          sumDistance,
+          maxDistance
+        };
+
+        if (
+          !minSumBest ||
+          sumDistance < minSumBest.sumDistance ||
+          (sumDistance === minSumBest.sumDistance && maxDistance < minSumBest.maxDistance) ||
+          (sumDistance === minSumBest.sumDistance &&
+            maxDistance === minSumBest.maxDistance &&
+            compareRankingsAlphabetically(ranking, minSumBest.ranking) < 0)
+        ) {
+          minSumBest = candidate;
+        }
+
+        if (
+          !minMaxBest ||
+          maxDistance < minMaxBest.maxDistance ||
+          (maxDistance === minMaxBest.maxDistance && sumDistance < minMaxBest.sumDistance) ||
+          (maxDistance === minMaxBest.maxDistance &&
+            sumDistance === minMaxBest.sumDistance &&
+            compareRankingsAlphabetically(ranking, minMaxBest.ranking) < 0)
+        ) {
+          minMaxBest = candidate;
+        }
+      });
+
+      chunks.push({
+        workerId: workerIndex + 1,
+        fixedFirstMovie,
+        permutationCount: tailPermutations.length,
+        minSumBest: minSumBest ?? {
+          ranking: [],
+          distances: [],
+          sumDistance: Number.POSITIVE_INFINITY,
+          maxDistance: Number.POSITIVE_INFINITY
+        },
+        minMaxBest: minMaxBest ?? {
+          ranking: [],
+          distances: [],
+          sumDistance: Number.POSITIVE_INFINITY,
+          maxDistance: Number.POSITIVE_INFINITY
+        }
+      });
+    }
+
+    const globalMinSum = [...chunks]
+      .map((chunk) => chunk.minSumBest)
+      .sort(
+        (left, right) =>
+          left.sumDistance - right.sumDistance ||
+          left.maxDistance - right.maxDistance ||
+          compareRankingsAlphabetically(left.ranking, right.ranking)
+      )[0];
+
+    const globalMinMax = [...chunks]
+      .map((chunk) => chunk.minMaxBest)
+      .sort(
+        (left, right) =>
+          left.maxDistance - right.maxDistance ||
+          left.sumDistance - right.sumDistance ||
+          compareRankingsAlphabetically(left.ranking, right.ranking)
+      )[0];
+
+    setLab4DistributedSearch({
+      inputSignature: lab4DistributedInputSignature,
+      workerCount,
+      permutationsPerWorker,
+      totalPermutations: chunks.reduce((total, chunk) => total + chunk.permutationCount, 0),
+      chunks,
+      globalMinSum,
+      globalMinMax,
+      matchesLab3MinSum:
+        globalMinSum.ranking.join('|') === lab3ExhaustiveSearch.minSumBest.ranking.join('|'),
+      matchesLab3MinMax:
+        globalMinMax.ranking.join('|') === lab3ExhaustiveSearch.minMaxBest.ranking.join('|')
+    });
+    setIsLab4DistributedRunning(false);
   };
   if (!isLoggedIn) {
     return (
@@ -1700,6 +1848,48 @@ export default function Admin() {
         ) : activeLab === 'lab4' ? (
           <>
             <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Схема декомпозиції прямого перебору</h2>
+              {lab2FinalCandidates.length > 0 ? (
+                <>
+                  <p className={styles.sectionText}>
+                    Для розподіленого перебору фіксую перший елемент перестановки. Кожен
+                    обчислювальний вузол отримує власний блок виду
+                    {' '}
+                    <span className={styles.inlineFormula}>
+                      [a<sub>k</sub>, ...]
+                    </span>
+                    {' '}
+                    і перебирає лише перестановки хвоста з решти
+                    {' '}
+                    {Math.max(lab2FinalCandidates.length - 1, 0)}
+                    {' '}
+                    об&apos;єктів.
+                  </p>
+                  <div className={styles.infoGrid}>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Кількість блоків</span>
+                      <strong className={styles.infoValue}>{lab2FinalCandidates.length}</strong>
+                    </article>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Перестановок у блоці</span>
+                      <strong className={styles.infoValue}>
+                        {factorial(Math.max(lab2FinalCandidates.length - 1, 0))}
+                      </strong>
+                    </article>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Повна потужність</span>
+                      <strong className={styles.infoValue}>{factorial(lab2FinalCandidates.length)}</strong>
+                    </article>
+                  </div>
+                </>
+              ) : (
+                <p className={`${styles.sectionText} ${styles.muted}`}>
+                  Спочатку потрібна фінальна підмножина з лабораторної роботи №2.
+                </p>
+              )}
+            </section>
+
+            <section className={styles.section}>
               <div className={styles.blockHeader}>
                 <h2 className={styles.sectionTitle}>Фінальна підмножина після евристик</h2>
                 <button
@@ -1755,20 +1945,215 @@ export default function Admin() {
 
               {isLab4RankingVisible && (
                 <div className={styles.expertRankingGrid}>
-                  {lab4PreviewRankings.map((ranking, index) => (
-                    <article
-                      key={`lab4-preview-${index + 1}`}
-                      className={styles.expertRankingCard}
-                    >
-                      <div className={styles.expertRankingHeader}>
-                        <span className={styles.expertRankingBadge}>Експерт {index + 1}</span>
-                      </div>
-                      <p className={styles.expertRankingText}>{ranking}</p>
-                    </article>
-                  ))}
+                  {lab2ExpertRankings.length > 0 ? (
+                    lab2ExpertRankings.map((row, index) => (
+                      <article
+                        key={`lab4-preview-${row.expert}-${index}`}
+                        className={styles.expertRankingCard}
+                      >
+                        <div className={styles.expertRankingHeader}>
+                          <span className={styles.expertRankingBadge}>{row.expert}</span>
+                        </div>
+                        <p className={styles.expertRankingText}>{row.ranking.join(' > ')}</p>
+                      </article>
+                    ))
+                  ) : (
+                    <p className={`${styles.sectionText} ${styles.muted}`}>
+                      Для побудови ранжувань потрібна фінальна підмножина ЛР2.
+                    </p>
+                  )}
                 </div>
               )}
             </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Компромісні ранжування з ЛР3</h2>
+              {lab3ExhaustiveSearch ? (
+                <div className={styles.infoGrid}>
+                  <article className={styles.infoCard}>
+                    <span className={styles.infoLabel}>MinSum</span>
+                    <strong className={styles.cardTitle}>
+                      {lab3ExhaustiveSearch.minSumBest.ranking.join(' > ')}
+                    </strong>
+                    <span className={styles.infoMeta}>
+                      сума = {lab3ExhaustiveSearch.minSumBest.sumDistance}, max ={' '}
+                      {lab3ExhaustiveSearch.minSumBest.maxDistance}
+                    </span>
+                  </article>
+                  <article className={styles.infoCard}>
+                    <span className={styles.infoLabel}>MinMax</span>
+                    <strong className={styles.cardTitle}>
+                      {lab3ExhaustiveSearch.minMaxBest.ranking.join(' > ')}
+                    </strong>
+                    <span className={styles.infoMeta}>
+                      max = {lab3ExhaustiveSearch.minMaxBest.maxDistance}, сума ={' '}
+                      {lab3ExhaustiveSearch.minMaxBest.sumDistance}
+                    </span>
+                  </article>
+                </div>
+              ) : (
+                <p className={`${styles.sectionText} ${styles.muted}`}>
+                  Для відображення компромісних ранжувань потрібно рівно 8 об&apos;єктів у фінальній
+                  підмножині.
+                </p>
+              )}
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Розподілений прямий перебір перестановок</h2>
+              <button
+                type='button'
+                className={baseStyles.button}
+                onClick={runLab4DistributedSearch}
+                disabled={isLab4DistributedRunning || !lab3ExhaustiveSearch}
+              >
+                {isLab4DistributedRunning ? 'Розрахунок...' : 'Запустити алгоритм'}
+              </button>
+              {activeLab4DistributedSearch ? (
+                <>
+                  <div className={styles.infoGrid}>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Централізований перебір</span>
+                      <strong className={styles.infoValue}>
+                        {lab3ExhaustiveSearch?.totalPermutations ?? 0} перестановок
+                      </strong>
+                      <span className={styles.infoMeta}>
+                        орієнтир для порівняння з результатами ЛР3
+                      </span>
+                    </article>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Розподілений перебір</span>
+                      <strong className={styles.infoValue}>
+                        {activeLab4DistributedSearch.workerCount} блоків по{' '}
+                        {activeLab4DistributedSearch.permutationsPerWorker}
+                      </strong>
+                      <span className={styles.infoMeta}>
+                        сумарно {activeLab4DistributedSearch.totalPermutations} перестановок
+                      </span>
+                    </article>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Співпадіння з ЛР3</span>
+                      <strong className={styles.infoValue}>
+                        {activeLab4DistributedSearch.matchesLab3MinSum &&
+                        activeLab4DistributedSearch.matchesLab3MinMax
+                          ? 'Так'
+                          : 'Ні'}
+                      </strong>
+                      <span className={styles.infoMeta}>
+                        MinSum: {activeLab4DistributedSearch.matchesLab3MinSum ? 'так' : 'ні'},
+                        {' '}MinMax: {activeLab4DistributedSearch.matchesLab3MinMax ? 'так' : 'ні'}
+                      </span>
+                    </article>
+                  </div>
+
+                  <div className={styles.tableWrap}>
+                    <table className={styles.table}>
+                      <thead>
+                        <tr>
+                          <th>Вузол</th>
+                          <th>Фіксований 1-й об&apos;єкт</th>
+                          <th>Перестановок</th>
+                          <th>Локальний MinSum</th>
+                          <th>Локальний MinMax</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activeLab4DistributedSearch.chunks.map((chunk) => (
+                          <tr key={`chunk-${chunk.workerId}-${chunk.fixedFirstMovie}`}>
+                            <td>W{chunk.workerId}</td>
+                            <td>{chunk.fixedFirstMovie}</td>
+                            <td>{chunk.permutationCount}</td>
+                            <td className={styles.sequenceCell}>
+                              {chunk.minSumBest.ranking.join(' > ')}
+                              <br />
+                              сума = {chunk.minSumBest.sumDistance}, max ={' '}
+                              {chunk.minSumBest.maxDistance}
+                            </td>
+                            <td className={styles.sequenceCell}>
+                              {chunk.minMaxBest.ranking.join(' > ')}
+                              <br />
+                              max = {chunk.minMaxBest.maxDistance}, сума ={' '}
+                              {chunk.minMaxBest.sumDistance}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className={styles.infoGrid}>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Глобальний MinSum</span>
+                      <strong className={styles.cardTitle}>
+                        {activeLab4DistributedSearch.globalMinSum.ranking.join(' > ')}
+                      </strong>
+                      <span className={styles.infoMeta}>
+                        сума = {activeLab4DistributedSearch.globalMinSum.sumDistance}, max ={' '}
+                        {activeLab4DistributedSearch.globalMinSum.maxDistance}
+                      </span>
+                    </article>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Глобальний MinMax</span>
+                      <strong className={styles.cardTitle}>
+                        {activeLab4DistributedSearch.globalMinMax.ranking.join(' > ')}
+                      </strong>
+                      <span className={styles.infoMeta}>
+                        max = {activeLab4DistributedSearch.globalMinMax.maxDistance}, сума ={' '}
+                        {activeLab4DistributedSearch.globalMinMax.sumDistance}
+                      </span>
+                    </article>
+                  </div>
+                </>
+              ) : (
+                <p className={`${styles.sectionText} ${styles.muted}`}>
+                  {!lab3ExhaustiveSearch
+                    ? 'Для запуску потрібно рівно 8 об&apos;єктів у фінальній підмножині та результати точного пошуку з ЛР3.'
+                    : 'Натисніть кнопку, щоб запустити розподілений прямий перебір перестановок.'}
+                </p>
+              )}
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Вибране компромісне ранжування</h2>
+              {lab4ChosenCompromise ? (
+                <>
+                  <p className={styles.sectionText}>
+                    Для подальших розрахунків обрано компроміс
+                    {' '}
+                    <span className={styles.inlineFormula}>MinSum</span>
+                    {' '}
+                    з розподіленого перебору.
+                  </p>
+                  <div className={styles.infoGrid}>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Порядок об&apos;єктів</span>
+                      <strong className={styles.cardTitle}>
+                        {lab4ChosenCompromise.ranking.join(' > ')}
+                      </strong>
+                    </article>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>A*</span>
+                      <strong className={styles.infoValue}>
+                        ({lab4ChosenCompromise.objectVector.join(', ')})
+                      </strong>
+                      <span className={styles.infoMeta}>вектор номерів об&apos;єктів</span>
+                    </article>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>R*</span>
+                      <strong className={styles.infoValue}>
+                        ({lab4ChosenCompromise.rankVector.join(', ')})
+                      </strong>
+                      <span className={styles.infoMeta}>вектор рангів об&apos;єктів</span>
+                    </article>
+                  </div>
+                </>
+              ) : (
+                <p className={`${styles.sectionText} ${styles.muted}`}>
+                  Обране компромісне ранжування з&apos;явиться після побудови розподіленого перебору.
+                </p>
+              )}
+            </section>
+
           </>
         ) : null}
       </div>
