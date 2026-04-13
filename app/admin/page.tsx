@@ -140,10 +140,50 @@ interface DistributedSearchResult {
   matchesLab3MinMax: boolean;
 }
 
-interface Lab4ChosenCompromise {
+interface EvolutionRankingScore {
   ranking: string[];
-  objectVector: number[];
-  rankVector: number[];
+  sumDistance: number;
+  maxDistance: number;
+}
+
+interface LargeScaleEvolutionSummary {
+  mode: 'simple' | 'island';
+  objective: 'min-sum';
+  populationSize: number;
+  generations: number;
+  bestRanking: string[];
+  bestSumDistance: number;
+  bestMaxDistance: number;
+  durationMs: number;
+}
+
+interface LargeScaleIslandSummary {
+  islandId: number;
+  populationSize: number;
+  durationMs: number;
+  bestRanking: string[];
+  bestSumDistance: number;
+  bestMaxDistance: number;
+}
+
+interface LargeScaleDistributedSummary extends LargeScaleEvolutionSummary {
+  islandCount: number;
+  islands: LargeScaleIslandSummary[];
+  estimatedParallelDurationMs: number;
+  migrationInterval: number;
+  migrantsPerIsland: number;
+}
+
+interface LargeScaleExperimentResult {
+  alternativeCount: number;
+  expertCount: number;
+  candidates: string[];
+  expertRankings: ExpertRankingRow[];
+  simple: LargeScaleEvolutionSummary;
+  distributed: LargeScaleDistributedSummary;
+  estimatedSpeedup: number;
+  qualityDelta: number;
+  analysis: string[];
 }
 
 const lab1ScoreMap = {
@@ -182,6 +222,23 @@ const generateExpertRankings = (candidates: string[], count: number): ExpertRank
     ranking: shuffleWithSeed(candidates, 1000 + index * 37)
   }));
 
+const randomPermutation = (items: string[]) => {
+  const result = [...items];
+
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+
+  return result;
+};
+
+const generateRandomExpertRankings = (candidates: string[], count: number): ExpertRankingRow[] =>
+  Array.from({ length: count }).map((_, index) => ({
+    expert: `Експерт ${index + 1}`,
+    ranking: randomPermutation(candidates)
+  }));
+
 const calculateHammingDistanceFull = (ranking: string[], expertRanking: string[]) =>
   ranking.reduce((total, movie, index) => total + (expertRanking[index] === movie ? 0 : 1), 0);
 
@@ -190,6 +247,21 @@ const calculateSumHammingAgainstExperts = (ranking: string[], expertRankings: Ex
     (total, expertRow) => total + calculateHammingDistanceFull(ranking, expertRow.ranking),
     0
   );
+
+const evaluateRankingAgainstExperts = (
+  ranking: string[],
+  expertRankings: ExpertRankingRow[]
+): EvolutionRankingScore => {
+  const distances = expertRankings.map((expertRow) =>
+    calculateHammingDistanceFull(ranking, expertRow.ranking)
+  );
+
+  return {
+    ranking,
+    sumDistance: distances.reduce((total, value) => total + value, 0),
+    maxDistance: Math.max(...distances)
+  };
+};
 
 const factorial = (value: number) => {
   let result = 1;
@@ -215,6 +287,40 @@ const mutateChromosome = (chromosome: string[]) => {
   return mutated;
 };
 
+const crossoverChromosomes = (leftParent: string[], rightParent: string[]) => {
+  if (leftParent.length < 2) {
+    return [...leftParent];
+  }
+
+  const start = Math.floor(Math.random() * leftParent.length);
+  const end = start + Math.floor(Math.random() * (leftParent.length - start));
+  const child = new Array<string>(leftParent.length).fill('');
+  const used = new Set<string>();
+
+  for (let index = start; index <= end; index += 1) {
+    child[index] = leftParent[index];
+    used.add(leftParent[index]);
+  }
+
+  let rightIndex = 0;
+
+  for (let childIndex = 0; childIndex < child.length; childIndex += 1) {
+    if (child[childIndex]) {
+      continue;
+    }
+
+    while (used.has(rightParent[rightIndex])) {
+      rightIndex += 1;
+    }
+
+    child[childIndex] = rightParent[rightIndex];
+    used.add(rightParent[rightIndex]);
+    rightIndex += 1;
+  }
+
+  return child;
+};
+
 const tournamentSelect = (
   population: { chromosome: string[]; sumDistance: number }[],
   tournamentSize: number
@@ -230,6 +336,96 @@ const tournamentSelect = (
 
   return best;
 };
+
+const compareEvolutionScores = (left: EvolutionRankingScore, right: EvolutionRankingScore) =>
+  left.sumDistance - right.sumDistance ||
+  left.maxDistance - right.maxDistance ||
+  compareRankingsAlphabetically(left.ranking, right.ranking);
+
+const tournamentSelectEvolution = (
+  population: EvolutionRankingScore[],
+  tournamentSize: number
+) => {
+  let best = population[Math.floor(Math.random() * population.length)];
+
+  for (let index = 1; index < tournamentSize; index += 1) {
+    const candidate = population[Math.floor(Math.random() * population.length)];
+    if (compareEvolutionScores(candidate, best) < 0) {
+      best = candidate;
+    }
+  }
+
+  return best;
+};
+
+const createEvolutionPopulation = (
+  candidates: string[],
+  size: number,
+  expertRankings: ExpertRankingRow[]
+) => {
+  const population: string[][] = [];
+  const seen = new Set<string>();
+
+  expertRankings.forEach((row) => {
+    if (population.length >= size) {
+      return;
+    }
+
+    const signature = row.ranking.join('|');
+    if (!seen.has(signature)) {
+      population.push([...row.ranking]);
+      seen.add(signature);
+    }
+  });
+
+  while (population.length < size) {
+    const ranking = randomPermutation(candidates);
+    const signature = ranking.join('|');
+
+    if (!seen.has(signature)) {
+      population.push(ranking);
+      seen.add(signature);
+    }
+  }
+
+  return population;
+};
+
+const evolvePopulationOnce = (
+  evaluatedPopulation: EvolutionRankingScore[],
+  targetSize: number,
+  tournamentSize: number,
+  mutationRate: number,
+  eliteCount: number
+) => {
+  const sorted = [...evaluatedPopulation].sort(compareEvolutionScores);
+  const nextPopulation = sorted
+    .slice(0, Math.min(eliteCount, sorted.length))
+    .map((item) => [...item.ranking]);
+
+  while (nextPopulation.length < targetSize) {
+    const leftParent = tournamentSelectEvolution(sorted, tournamentSize);
+    const rightParent = tournamentSelectEvolution(sorted, tournamentSize);
+    let child = crossoverChromosomes(leftParent.ranking, rightParent.ranking);
+
+    if (Math.random() < mutationRate) {
+      child = mutateChromosome(child);
+    }
+
+    if (Math.random() < mutationRate / 2) {
+      child = mutateChromosome(child);
+    }
+
+    nextPopulation.push(child);
+  }
+
+  return nextPopulation;
+};
+
+const yieldToBrowser = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+const formatDuration = (durationMs: number) =>
+  durationMs >= 1000 ? `${(durationMs / 1000).toFixed(2)} с` : `${durationMs} мс`;
 
 const generatePermutations = (items: string[]) => {
   const result: string[][] = [];
@@ -317,6 +513,12 @@ export default function Admin() {
     null
   );
   const [isLab4DistributedRunning, setIsLab4DistributedRunning] = useState(false);
+  const [lab4LargeExpertCount, setLab4LargeExpertCount] = useState(30);
+  const [lab4IslandCount, setLab4IslandCount] = useState(2);
+  const [lab4LargeScaleResult, setLab4LargeScaleResult] = useState<LargeScaleExperimentResult | null>(
+    null
+  );
+  const [isLab4LargeScaleRunning, setIsLab4LargeScaleRunning] = useState(false);
   const [isLab4RankingVisible, setIsLab4RankingVisible] = useState(true);
   const [isLab4SubsetVisible, setIsLab4SubsetVisible] = useState(true);
 
@@ -665,20 +867,6 @@ export default function Admin() {
     lab4DistributedSearch?.inputSignature === lab4DistributedInputSignature
       ? lab4DistributedSearch
       : null;
-
-  const lab4ChosenCompromise = useMemo<Lab4ChosenCompromise | null>(() => {
-    if (!activeLab4DistributedSearch) {
-      return null;
-    }
-
-    return {
-      ranking: activeLab4DistributedSearch.globalMinSum.ranking,
-      objectVector: activeLab4DistributedSearch.globalMinSum.ranking.map(
-        (movie) => lab2FinalCandidates.findIndex((candidate) => candidate === movie) + 1
-      ),
-      rankVector: activeLab4DistributedSearch.globalMinSum.ranking.map((_, index) => index + 1)
-    };
-  }, [activeLab4DistributedSearch, lab2FinalCandidates]);
 
   const runEvolutionSearch = async () => {
     if (lab2FinalCandidates.length === 0) {
@@ -1066,6 +1254,196 @@ export default function Admin() {
     });
     setIsLab4DistributedRunning(false);
   };
+
+  const runLab4LargeScaleExperiment = async () => {
+    setIsLab4LargeScaleRunning(true);
+    setLab4LargeScaleResult(null);
+
+    const candidates = [...movies];
+    const expertRankings = generateRandomExpertRankings(candidates, lab4LargeExpertCount);
+    const generations = 36;
+    const totalPopulation = 96;
+    const tournamentSize = 4;
+    const mutationRate = 0.32;
+    const eliteCount = 4;
+    const migrationInterval = 6;
+    const migrantsPerIsland = 2;
+
+    const evaluatePopulation = async (population: string[][]) => {
+      const chunkSize = 16;
+      const evaluated: EvolutionRankingScore[] = [];
+
+      for (let index = 0; index < population.length; index += chunkSize) {
+        const chunk = population.slice(index, index + chunkSize);
+        evaluated.push(
+          ...chunk.map((ranking) => evaluateRankingAgainstExperts(ranking, expertRankings))
+        );
+        await yieldToBrowser();
+      }
+
+      return evaluated;
+    };
+
+    const simplePopulationSize = totalPopulation;
+    let simplePopulation = createEvolutionPopulation(candidates, simplePopulationSize, expertRankings);
+    let simpleBest: EvolutionRankingScore | null = null;
+    const simpleStart = Date.now();
+
+    for (let generation = 0; generation < generations; generation += 1) {
+      const evaluated = await evaluatePopulation(simplePopulation);
+      const generationBest = [...evaluated].sort(compareEvolutionScores)[0];
+
+      if (!simpleBest || compareEvolutionScores(generationBest, simpleBest) < 0) {
+        simpleBest = generationBest;
+      }
+
+      simplePopulation = evolvePopulationOnce(
+        evaluated,
+        simplePopulationSize,
+        tournamentSize,
+        mutationRate,
+        eliteCount
+      );
+    }
+
+    const simpleDurationMs = Date.now() - simpleStart;
+    const simpleResult: LargeScaleEvolutionSummary = {
+      mode: 'simple',
+      objective: 'min-sum',
+      populationSize: simplePopulationSize,
+      generations,
+      bestRanking: simpleBest?.ranking ?? [],
+      bestSumDistance: simpleBest?.sumDistance ?? Number.POSITIVE_INFINITY,
+      bestMaxDistance: simpleBest?.maxDistance ?? Number.POSITIVE_INFINITY,
+      durationMs: simpleDurationMs
+    };
+
+    const islandPopulationSize = Math.max(24, Math.floor(totalPopulation / lab4IslandCount));
+    let islandPopulations = Array.from({ length: lab4IslandCount }, () =>
+      createEvolutionPopulation(candidates, islandPopulationSize, expertRankings)
+    );
+    const islandDurations = new Array(lab4IslandCount).fill(0);
+    const islandBests = new Array<EvolutionRankingScore | null>(lab4IslandCount).fill(null);
+    const distributedStart = Date.now();
+
+    for (let generation = 0; generation < generations; generation += 1) {
+      const nextPopulations: string[][][] = [];
+
+      for (let islandIndex = 0; islandIndex < lab4IslandCount; islandIndex += 1) {
+        const islandStart = Date.now();
+        const evaluated = await evaluatePopulation(islandPopulations[islandIndex]);
+        const sorted = [...evaluated].sort(compareEvolutionScores);
+        const islandBest = sorted[0];
+
+        if (!islandBests[islandIndex] || compareEvolutionScores(islandBest, islandBests[islandIndex]!) < 0) {
+          islandBests[islandIndex] = islandBest;
+        }
+
+        nextPopulations.push(
+          evolvePopulationOnce(
+            evaluated,
+            islandPopulationSize,
+            tournamentSize,
+            mutationRate,
+            Math.min(eliteCount, islandPopulationSize)
+          )
+        );
+        islandDurations[islandIndex] += Date.now() - islandStart;
+      }
+
+      islandPopulations = nextPopulations;
+
+      if ((generation + 1) % migrationInterval === 0 && lab4IslandCount > 1) {
+        const migrants = islandBests.map((best, islandIndex) => ({
+          islandIndex,
+          migrants:
+            best === null
+              ? []
+              : Array.from({ length: migrantsPerIsland }, () => mutateChromosome(best.ranking))
+        }));
+
+        islandPopulations = islandPopulations.map((population, islandIndex) => {
+          const source = migrants[(islandIndex - 1 + migrants.length) % migrants.length];
+          if (source.migrants.length === 0) {
+            return population;
+          }
+
+          const preserved = population.slice(0, Math.max(population.length - migrantsPerIsland, 0));
+          return [...preserved, ...source.migrants.map((ranking) => [...ranking])];
+        });
+      }
+
+      await yieldToBrowser();
+    }
+
+    const distributedDurationMs = Date.now() - distributedStart;
+    const islandSummaries: LargeScaleIslandSummary[] = islandBests.map((best, index) => ({
+      islandId: index + 1,
+      populationSize: islandPopulationSize,
+      durationMs: islandDurations[index],
+      bestRanking: best?.ranking ?? [],
+      bestSumDistance: best?.sumDistance ?? Number.POSITIVE_INFINITY,
+      bestMaxDistance: best?.maxDistance ?? Number.POSITIVE_INFINITY
+    }));
+
+    const distributedBest = islandSummaries
+      .map((island) => ({
+        ranking: island.bestRanking,
+        sumDistance: island.bestSumDistance,
+        maxDistance: island.bestMaxDistance
+      }))
+      .sort(compareEvolutionScores)[0];
+
+    const estimatedParallelDurationMs = Math.max(...islandDurations);
+    const distributedResult: LargeScaleDistributedSummary = {
+      mode: 'island',
+      objective: 'min-sum',
+      populationSize: islandPopulationSize * lab4IslandCount,
+      generations,
+      bestRanking: distributedBest?.ranking ?? [],
+      bestSumDistance: distributedBest?.sumDistance ?? Number.POSITIVE_INFINITY,
+      bestMaxDistance: distributedBest?.maxDistance ?? Number.POSITIVE_INFINITY,
+      durationMs: distributedDurationMs,
+      islandCount: lab4IslandCount,
+      islands: islandSummaries,
+      estimatedParallelDurationMs,
+      migrationInterval,
+      migrantsPerIsland
+    };
+
+    const estimatedSpeedup =
+      estimatedParallelDurationMs > 0
+        ? Number((simpleDurationMs / estimatedParallelDurationMs).toFixed(2))
+        : 0;
+    const qualityDelta = distributedResult.bestSumDistance - simpleResult.bestSumDistance;
+
+    const analysis = [
+      `Для n = ${candidates.length} альтернатив повний перебір уже практично непридатний, тому використано еволюційний пошук за критерієм MinSum.`,
+      `Згенеровано ${lab4LargeExpertCount} випадкових ранжувань експертів; кожне ранжування охоплює всі ${candidates.length} альтернатив.`,
+      `Базова еволюційна стратегія дала ΣH = ${simpleResult.bestSumDistance} за ${formatDuration(simpleResult.durationMs)}.`,
+      `Острівна декомпозиція на ${lab4IslandCount} острови дала ΣH = ${distributedResult.bestSumDistance}; фактичний час у браузері ${formatDuration(distributedResult.durationMs)}, а оцінка паралельного виконання становить ${formatDuration(distributedResult.estimatedParallelDurationMs)}.`,
+      qualityDelta < 0
+        ? `Острівна модель знайшла кращий компроміс: виграш за сумою відстаней становить ${Math.abs(qualityDelta)}.`
+        : qualityDelta > 0
+          ? `Базова стратегія дала трохи кращий компроміс: різниця за сумою відстаней становить ${qualityDelta}.`
+          : 'Обидва режими дали однакову якість компромісу за сумою відстаней.',
+      `Оцінене прискорення для реального паралельного запуску на окремих вузлах становить приблизно ×${estimatedSpeedup}.`
+    ];
+
+    setLab4LargeScaleResult({
+      alternativeCount: candidates.length,
+      expertCount: lab4LargeExpertCount,
+      candidates,
+      expertRankings,
+      simple: simpleResult,
+      distributed: distributedResult,
+      estimatedSpeedup,
+      qualityDelta,
+      analysis
+    });
+    setIsLab4LargeScaleRunning(false);
+  };
+
   if (!isLoggedIn) {
     return (
       <div className={baseStyles.page}>
@@ -2114,42 +2492,249 @@ export default function Admin() {
             </section>
 
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Вибране компромісне ранжування</h2>
-              {lab4ChosenCompromise ? (
-                <>
+              <h2 className={styles.sectionTitle}>
+                Схема розподіленого еволюційного розв&apos;язання для n &gt;&gt; 12
+              </h2>
+              <p className={styles.sectionText}>
+                Для великої кількості альтернатив використовую всі
+                {' '}
+                {movies.length}
+                {' '}
+                фільмів, випадково генерую повні ранжування експертів і розв&apos;язую задачу двома
+                способами: як єдина еволюційна стратегія та як острівна декомпозиція з міграцією
+                кращих особин.
+              </p>
+              <div className={styles.schemeGrid}>
+                <article className={styles.schemeCard}>
+                  <span className={styles.schemeStep}>1</span>
+                  <h3 className={styles.subTitle}>Генерація даних</h3>
                   <p className={styles.sectionText}>
-                    Для подальших розрахунків обрано компроміс
+                    Формується
                     {' '}
-                    <span className={styles.inlineFormula}>MinSum</span>
+                    {lab4LargeExpertCount}
                     {' '}
-                    з розподіленого перебору.
+                    випадкових експертних ранжувань для
+                    {' '}
+                    {movies.length}
+                    {' '}
+                    альтернатив.
                   </p>
+                </article>
+                <article className={styles.schemeCard}>
+                  <span className={styles.schemeStep}>2</span>
+                  <h3 className={styles.subTitle}>Острівна декомпозиція</h3>
+                  <p className={styles.sectionText}>
+                    Популяція розбивається на
+                    {' '}
+                    {lab4IslandCount}
+                    {' '}
+                    острови; на кожному вузлі виконується власна еволюційна стратегія.
+                  </p>
+                </article>
+                <article className={styles.schemeCard}>
+                  <span className={styles.schemeStep}>3</span>
+                  <h3 className={styles.subTitle}>Міграція</h3>
+                  <p className={styles.sectionText}>
+                    Через фіксований інтервал поколінь найкращі особини мігрують між островами по
+                    кільцю.
+                  </p>
+                </article>
+                <article className={styles.schemeCard}>
+                  <span className={styles.schemeStep}>4</span>
+                  <h3 className={styles.subTitle}>Агрегація</h3>
+                  <p className={styles.sectionText}>
+                    Після завершення еволюції порівнюються локальні найкращі ранжування та
+                    визначається глобальний компроміс.
+                  </p>
+                </article>
+              </div>
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>
+                Випадкові ранжування та еволюційні алгоритми для n &gt;&gt; 12
+              </h2>
+              <div className={styles.controlRow}>
+                <div className={baseStyles.inputGroup}>
+                  <label htmlFor='lab4-expert-count' className={styles.controlLabel}>
+                    Кількість експертів
+                  </label>
+                  <select
+                    id='lab4-expert-count'
+                    value={lab4LargeExpertCount}
+                    onChange={(e) => setLab4LargeExpertCount(Number(e.target.value))}
+                    className={styles.select}
+                    disabled={isLab4LargeScaleRunning}
+                  >
+                    {[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((count) => (
+                      <option key={`expert-count-${count}`} value={count}>
+                        {count}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className={baseStyles.inputGroup}>
+                  <label htmlFor='lab4-island-count' className={styles.controlLabel}>
+                    Кількість островів / варіацій
+                  </label>
+                  <select
+                    id='lab4-island-count'
+                    value={lab4IslandCount}
+                    onChange={(e) => setLab4IslandCount(Number(e.target.value))}
+                    className={styles.select}
+                    disabled={isLab4LargeScaleRunning}
+                  >
+                    {[2, 3, 4].map((count) => (
+                      <option key={`island-count-${count}`} value={count}>
+                        {count}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type='button'
+                  className={baseStyles.button}
+                  onClick={runLab4LargeScaleExperiment}
+                  disabled={isLab4LargeScaleRunning}
+                >
+                  {isLab4LargeScaleRunning ? 'Розрахунок...' : 'Згенерувати та запустити'}
+                </button>
+              </div>
+              <p className={`${styles.sectionText} ${styles.muted}`}>
+                Порівняння виконується між базовою еволюційною стратегією та декомпозицією на
+                острови з міграцією найкращих особин.
+              </p>
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Результати для великої задачі</h2>
+              {lab4LargeScaleResult ? (
+                <>
                   <div className={styles.infoGrid}>
                     <article className={styles.infoCard}>
-                      <span className={styles.infoLabel}>Порядок об&apos;єктів</span>
+                      <span className={styles.infoLabel}>Розмір задачі</span>
+                      <strong className={styles.infoValue}>
+                        n = {lab4LargeScaleResult.alternativeCount}
+                      </strong>
+                      <span className={styles.infoMeta}>
+                        {lab4LargeScaleResult.expertCount} випадкових експертних ранжувань
+                      </span>
+                    </article>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Базова стратегія</span>
+                      <strong className={styles.infoValue}>
+                        {formatDuration(lab4LargeScaleResult.simple.durationMs)}
+                      </strong>
+                      <span className={styles.infoMeta}>
+                        ΣH = {lab4LargeScaleResult.simple.bestSumDistance}, max ={' '}
+                        {lab4LargeScaleResult.simple.bestMaxDistance}
+                      </span>
+                    </article>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Острівна модель</span>
+                      <strong className={styles.infoValue}>
+                        {formatDuration(lab4LargeScaleResult.distributed.durationMs)}
+                      </strong>
+                      <span className={styles.infoMeta}>
+                        фактично в браузері; оцінка паралельного запуску{' '}
+                        {formatDuration(lab4LargeScaleResult.distributed.estimatedParallelDurationMs)}
+                      </span>
+                    </article>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Оцінене прискорення</span>
+                      <strong className={styles.infoValue}>
+                        ×{lab4LargeScaleResult.estimatedSpeedup.toFixed(2)}
+                      </strong>
+                      <span className={styles.infoMeta}>
+                        {lab4LargeScaleResult.distributed.islandCount} острови, міграція кожні{' '}
+                        {lab4LargeScaleResult.distributed.migrationInterval} поколінь
+                      </span>
+                    </article>
+                  </div>
+
+                  <div className={styles.infoGrid}>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Найкращий результат: базова стратегія</span>
                       <strong className={styles.cardTitle}>
-                        {lab4ChosenCompromise.ranking.join(' > ')}
+                        {lab4LargeScaleResult.simple.bestRanking.join(' > ')}
                       </strong>
+                      <span className={styles.infoMeta}>
+                        популяція = {lab4LargeScaleResult.simple.populationSize}, поколінь ={' '}
+                        {lab4LargeScaleResult.simple.generations}
+                      </span>
                     </article>
                     <article className={styles.infoCard}>
-                      <span className={styles.infoLabel}>A*</span>
-                      <strong className={styles.infoValue}>
-                        ({lab4ChosenCompromise.objectVector.join(', ')})
+                      <span className={styles.infoLabel}>Найкращий результат: острови</span>
+                      <strong className={styles.cardTitle}>
+                        {lab4LargeScaleResult.distributed.bestRanking.join(' > ')}
                       </strong>
-                      <span className={styles.infoMeta}>вектор номерів об&apos;єктів</span>
+                      <span className={styles.infoMeta}>
+                        сумарна популяція = {lab4LargeScaleResult.distributed.populationSize},
+                        {' '}мігрантів на острів = {lab4LargeScaleResult.distributed.migrantsPerIsland}
+                      </span>
                     </article>
-                    <article className={styles.infoCard}>
-                      <span className={styles.infoLabel}>R*</span>
-                      <strong className={styles.infoValue}>
-                        ({lab4ChosenCompromise.rankVector.join(', ')})
-                      </strong>
-                      <span className={styles.infoMeta}>вектор рангів об&apos;єктів</span>
-                    </article>
+                  </div>
+
+                  <div className={styles.tableWrap}>
+                    <table className={styles.table}>
+                      <thead>
+                        <tr>
+                          <th>Острів</th>
+                          <th>Популяція</th>
+                          <th>Час</th>
+                          <th>Локальний компроміс</th>
+                          <th>ΣH / max</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lab4LargeScaleResult.distributed.islands.map((island) => (
+                          <tr key={`large-island-${island.islandId}`}>
+                            <td>Острів {island.islandId}</td>
+                            <td>{island.populationSize}</td>
+                            <td>{formatDuration(island.durationMs)}</td>
+                            <td className={styles.sequenceCell}>{island.bestRanking.join(' > ')}</td>
+                            <td>
+                              {island.bestSumDistance} / {island.bestMaxDistance}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className={styles.blockHeader}>
+                    <h3 className={styles.subTitle}>Приклад згенерованих ранжувань експертів</h3>
+                  </div>
+                  <div className={styles.expertRankingGrid}>
+                    {lab4LargeScaleResult.expertRankings.slice(0, 6).map((row) => (
+                      <article key={`large-expert-${row.expert}`} className={styles.expertRankingCard}>
+                        <div className={styles.expertRankingHeader}>
+                          <span className={styles.expertRankingBadge}>{row.expert}</span>
+                        </div>
+                        <p className={styles.expertRankingText}>{row.ranking.join(' > ')}</p>
+                      </article>
+                    ))}
+                  </div>
+
+                  <div className={styles.analysisCard}>
+                    <h3 className={styles.subTitle}>Аналіз результатів</h3>
+                    <ul className={styles.analysisList}>
+                      {lab4LargeScaleResult.analysis.map((item, index) => (
+                        <li key={`lab4-analysis-${index}`}>{item}</li>
+                      ))}
+                    </ul>
                   </div>
                 </>
               ) : (
                 <p className={`${styles.sectionText} ${styles.muted}`}>
-                  Обране компромісне ранжування з&apos;явиться після побудови розподіленого перебору.
+                  Оберіть кількість експертів, кількість островів та запустіть експеримент, щоб
+                  оцінити швидкість і якість компромісного розв&apos;язку для
+                  {' '}
+                  {movies.length}
+                  {' '}
+                  альтернатив.
                 </p>
               )}
             </section>

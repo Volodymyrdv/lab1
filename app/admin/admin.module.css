@@ -435,6 +435,50 @@
   box-shadow: 0 0 0 4px rgba(138, 43, 226, 0.12);
 }
 
+.schemeGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.schemeCard {
+  padding: 16px;
+  border: 1px solid #dcc6ff;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(168, 85, 247, 0.12), transparent 34%),
+    linear-gradient(180deg, #ffffff 0%, #fbf7ff 100%);
+  box-shadow: 0 8px 16px rgba(138, 43, 226, 0.08);
+}
+
+.schemeStep {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #8a2be2 0%, #a855f7 100%);
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.analysisCard {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid #dcc6ff;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #faf5ff 100%);
+}
+
+.analysisList {
+  margin: 0;
+  padding-left: 20px;
+  color: #4a4a4a;
+  line-height: 1.7;
+}
+
 @media (max-width: 768px) {
   .toolbar {
     align-items: stretch;
