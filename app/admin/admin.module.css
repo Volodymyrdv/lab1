@@ -420,6 +420,35 @@
   margin-bottom: 8px;
 }
 
+.lab4Subnav {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.lab4SubnavButton {
+  border: 2px solid #8a2be2;
+  background: linear-gradient(135deg, #ffffff 0%, #f7efff 100%);
+  color: #8a2be2;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.lab4SubnavButton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(138, 43, 226, 0.16);
+}
+
+.lab4SubnavButtonActive {
+  background: linear-gradient(135deg, #8a2be2 0%, #a855f7 100%);
+  color: #ffffff;
+  box-shadow: 0 8px 16px rgba(138, 43, 226, 0.2);
+}
+
 .select {
   min-width: 280px;
   padding: 12px 14px;
@@ -435,48 +464,71 @@
   box-shadow: 0 0 0 4px rgba(138, 43, 226, 0.12);
 }
 
-.schemeGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 14px;
-}
-
-.schemeCard {
-  padding: 16px;
-  border: 1px solid #dcc6ff;
-  border-radius: 16px;
-  background:
-    radial-gradient(circle at top right, rgba(168, 85, 247, 0.12), transparent 34%),
-    linear-gradient(180deg, #ffffff 0%, #fbf7ff 100%);
-  box-shadow: 0 8px 16px rgba(138, 43, 226, 0.08);
-}
-
-.schemeStep {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin-bottom: 12px;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #8a2be2 0%, #a855f7 100%);
-  color: #ffffff;
-  font-weight: 800;
-}
-
-.analysisCard {
-  margin-top: 18px;
+.timeChartCard {
+  margin: 18px 0;
   padding: 18px;
   border: 1px solid #dcc6ff;
   border-radius: 16px;
   background: linear-gradient(180deg, #ffffff 0%, #faf5ff 100%);
 }
 
-.analysisList {
-  margin: 0;
-  padding-left: 20px;
+.timeChartRow + .timeChartRow {
+  margin-top: 16px;
+}
+
+.timeChartHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.timeChartLabel {
   color: #4a4a4a;
-  line-height: 1.7;
+  font-weight: 700;
+}
+
+.timeChartValue {
+  color: #6d28d9;
+  font-weight: 800;
+}
+
+.timeChartTrack {
+  width: 100%;
+  height: 16px;
+  border-radius: 999px;
+  background: #efe4ff;
+  overflow: hidden;
+}
+
+.timeChartBar {
+  height: 100%;
+  min-width: 4px;
+  border-radius: 999px;
+}
+
+.timeChartBarPrimary {
+  background: linear-gradient(90deg, #8a2be2 0%, #a855f7 100%);
+}
+
+.timeChartBarSecondary {
+  background: linear-gradient(90deg, #7c3aed 0%, #c084fc 100%);
+}
+
+.timeChartBarAccent {
+  background: linear-gradient(90deg, #4c1d95 0%, #8b5cf6 100%);
+}
+
+.timeChartBarIsland {
+  background: linear-gradient(90deg, #9333ea 0%, #e879f9 100%);
+}
+
+.timeChartMeta {
+  display: block;
+  margin-top: 8px;
+  color: #6f6484;
+  line-height: 1.5;
 }
 
 @media (max-width: 768px) {
@@ -504,6 +556,10 @@
 
   .controlRow {
     align-items: stretch;
+  }
+
+  .lab4SubnavButton {
+    width: 100%;
   }
 
   .select {

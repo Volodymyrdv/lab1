@@ -183,7 +183,6 @@ interface LargeScaleExperimentResult {
   distributed: LargeScaleDistributedSummary;
   estimatedSpeedup: number;
   qualityDelta: number;
-  analysis: string[];
 }
 
 const lab1ScoreMap = {
@@ -519,6 +518,7 @@ export default function Admin() {
     null
   );
   const [isLab4LargeScaleRunning, setIsLab4LargeScaleRunning] = useState(false);
+  const [lab4View, setLab4View] = useState<'all' | 'classic' | 'large'>('all');
   const [isLab4RankingVisible, setIsLab4RankingVisible] = useState(true);
   const [isLab4SubsetVisible, setIsLab4SubsetVisible] = useState(true);
 
@@ -1417,19 +1417,6 @@ export default function Admin() {
         : 0;
     const qualityDelta = distributedResult.bestSumDistance - simpleResult.bestSumDistance;
 
-    const analysis = [
-      `Для n = ${candidates.length} альтернатив повний перебір уже практично непридатний, тому використано еволюційний пошук за критерієм MinSum.`,
-      `Згенеровано ${lab4LargeExpertCount} випадкових ранжувань експертів; кожне ранжування охоплює всі ${candidates.length} альтернатив.`,
-      `Базова еволюційна стратегія дала ΣH = ${simpleResult.bestSumDistance} за ${formatDuration(simpleResult.durationMs)}.`,
-      `Острівна декомпозиція на ${lab4IslandCount} острови дала ΣH = ${distributedResult.bestSumDistance}; фактичний час у браузері ${formatDuration(distributedResult.durationMs)}, а оцінка паралельного виконання становить ${formatDuration(distributedResult.estimatedParallelDurationMs)}.`,
-      qualityDelta < 0
-        ? `Острівна модель знайшла кращий компроміс: виграш за сумою відстаней становить ${Math.abs(qualityDelta)}.`
-        : qualityDelta > 0
-          ? `Базова стратегія дала трохи кращий компроміс: різниця за сумою відстаней становить ${qualityDelta}.`
-          : 'Обидва режими дали однакову якість компромісу за сумою відстаней.',
-      `Оцінене прискорення для реального паралельного запуску на окремих вузлах становить приблизно ×${estimatedSpeedup}.`
-    ];
-
     setLab4LargeScaleResult({
       alternativeCount: candidates.length,
       expertCount: lab4LargeExpertCount,
@@ -1438,8 +1425,7 @@ export default function Admin() {
       simple: simpleResult,
       distributed: distributedResult,
       estimatedSpeedup,
-      qualityDelta,
-      analysis
+      qualityDelta
     });
     setIsLab4LargeScaleRunning(false);
   };
@@ -2226,6 +2212,30 @@ export default function Admin() {
         ) : activeLab === 'lab4' ? (
           <>
             <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Навігація по ЛР4</h2>
+              <div className={styles.lab4Subnav}>
+                {[
+                  { value: 'all', label: 'Усі блоки' },
+                  { value: 'classic', label: 'ЛР3 + розподіл' },
+                  { value: 'large', label: 'n >> 12' }
+                ].map((item) => (
+                  <button
+                    key={`lab4-view-${item.value}`}
+                    type='button'
+                    className={`${styles.lab4SubnavButton} ${
+                      lab4View === item.value ? styles.lab4SubnavButtonActive : ''
+                    }`}
+                    onClick={() => setLab4View(item.value as 'all' | 'classic' | 'large')}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {(lab4View === 'all' || lab4View === 'classic') && (
+              <>
+            <section className={styles.section}>
               <h2 className={styles.sectionTitle}>Схема декомпозиції прямого перебору</h2>
               {lab2FinalCandidates.length > 0 ? (
                 <>
@@ -2490,66 +2500,11 @@ export default function Admin() {
                 </p>
               )}
             </section>
+              </>
+            )}
 
-            <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>
-                Схема розподіленого еволюційного розв&apos;язання для n &gt;&gt; 12
-              </h2>
-              <p className={styles.sectionText}>
-                Для великої кількості альтернатив використовую всі
-                {' '}
-                {movies.length}
-                {' '}
-                фільмів, випадково генерую повні ранжування експертів і розв&apos;язую задачу двома
-                способами: як єдина еволюційна стратегія та як острівна декомпозиція з міграцією
-                кращих особин.
-              </p>
-              <div className={styles.schemeGrid}>
-                <article className={styles.schemeCard}>
-                  <span className={styles.schemeStep}>1</span>
-                  <h3 className={styles.subTitle}>Генерація даних</h3>
-                  <p className={styles.sectionText}>
-                    Формується
-                    {' '}
-                    {lab4LargeExpertCount}
-                    {' '}
-                    випадкових експертних ранжувань для
-                    {' '}
-                    {movies.length}
-                    {' '}
-                    альтернатив.
-                  </p>
-                </article>
-                <article className={styles.schemeCard}>
-                  <span className={styles.schemeStep}>2</span>
-                  <h3 className={styles.subTitle}>Острівна декомпозиція</h3>
-                  <p className={styles.sectionText}>
-                    Популяція розбивається на
-                    {' '}
-                    {lab4IslandCount}
-                    {' '}
-                    острови; на кожному вузлі виконується власна еволюційна стратегія.
-                  </p>
-                </article>
-                <article className={styles.schemeCard}>
-                  <span className={styles.schemeStep}>3</span>
-                  <h3 className={styles.subTitle}>Міграція</h3>
-                  <p className={styles.sectionText}>
-                    Через фіксований інтервал поколінь найкращі особини мігрують між островами по
-                    кільцю.
-                  </p>
-                </article>
-                <article className={styles.schemeCard}>
-                  <span className={styles.schemeStep}>4</span>
-                  <h3 className={styles.subTitle}>Агрегація</h3>
-                  <p className={styles.sectionText}>
-                    Після завершення еволюції порівнюються локальні найкращі ранжування та
-                    визначається глобальний компроміс.
-                  </p>
-                </article>
-              </div>
-            </section>
-
+            {(lab4View === 'all' || lab4View === 'large') && (
+              <>
             <section className={styles.section}>
               <h2 className={styles.sectionTitle}>
                 Випадкові ранжування та еволюційні алгоритми для n &gt;&gt; 12
@@ -2612,46 +2567,67 @@ export default function Admin() {
               <h2 className={styles.sectionTitle}>Результати для великої задачі</h2>
               {lab4LargeScaleResult ? (
                 <>
-                  <div className={styles.infoGrid}>
-                    <article className={styles.infoCard}>
-                      <span className={styles.infoLabel}>Розмір задачі</span>
-                      <strong className={styles.infoValue}>
-                        n = {lab4LargeScaleResult.alternativeCount}
-                      </strong>
-                      <span className={styles.infoMeta}>
-                        {lab4LargeScaleResult.expertCount} випадкових експертних ранжувань
-                      </span>
-                    </article>
-                    <article className={styles.infoCard}>
-                      <span className={styles.infoLabel}>Базова стратегія</span>
-                      <strong className={styles.infoValue}>
-                        {formatDuration(lab4LargeScaleResult.simple.durationMs)}
-                      </strong>
-                      <span className={styles.infoMeta}>
-                        ΣH = {lab4LargeScaleResult.simple.bestSumDistance}, max ={' '}
-                        {lab4LargeScaleResult.simple.bestMaxDistance}
-                      </span>
-                    </article>
-                    <article className={styles.infoCard}>
-                      <span className={styles.infoLabel}>Острівна модель</span>
-                      <strong className={styles.infoValue}>
-                        {formatDuration(lab4LargeScaleResult.distributed.durationMs)}
-                      </strong>
-                      <span className={styles.infoMeta}>
-                        фактично в браузері; оцінка паралельного запуску{' '}
-                        {formatDuration(lab4LargeScaleResult.distributed.estimatedParallelDurationMs)}
-                      </span>
-                    </article>
-                    <article className={styles.infoCard}>
-                      <span className={styles.infoLabel}>Оцінене прискорення</span>
-                      <strong className={styles.infoValue}>
-                        ×{lab4LargeScaleResult.estimatedSpeedup.toFixed(2)}
-                      </strong>
-                      <span className={styles.infoMeta}>
-                        {lab4LargeScaleResult.distributed.islandCount} острови, міграція кожні{' '}
-                        {lab4LargeScaleResult.distributed.migrationInterval} поколінь
-                      </span>
-                    </article>
+                  <p className={styles.sectionText}>
+                    Для
+                    {' '}
+                    {lab4LargeScaleResult.alternativeCount}
+                    {' '}
+                    альтернатив і
+                    {' '}
+                    {lab4LargeScaleResult.expertCount}
+                    {' '}
+                    випадкових експертних ранжувань порівнюються базова стратегія та острівна
+                    декомпозиція на
+                    {' '}
+                    {lab4LargeScaleResult.distributed.islandCount}
+                    {' '}
+                    острови.
+                  </p>
+
+                  <div className={styles.timeChartCard}>
+                    <h3 className={styles.subTitle}>Графік часу виконання</h3>
+                    {[
+                      {
+                        label: 'Базова стратегія',
+                        value: lab4LargeScaleResult.simple.durationMs,
+                        note: `ΣH = ${lab4LargeScaleResult.simple.bestSumDistance}`
+                      },
+                      {
+                        label: 'Острівна модель',
+                        value: lab4LargeScaleResult.distributed.durationMs,
+                        note: `ΣH = ${lab4LargeScaleResult.distributed.bestSumDistance}`
+                      },
+                      {
+                        label: 'Паралельна оцінка',
+                        value: lab4LargeScaleResult.distributed.estimatedParallelDurationMs,
+                        note: `прискорення ×${lab4LargeScaleResult.estimatedSpeedup.toFixed(2)}`
+                      }
+                    ].map((row, index, collection) => {
+                      const maxValue = Math.max(...collection.map((item) => item.value), 1);
+                      const width = (row.value / maxValue) * 100;
+
+                      return (
+                        <div key={`time-chart-${row.label}`} className={styles.timeChartRow}>
+                          <div className={styles.timeChartHeader}>
+                            <span className={styles.timeChartLabel}>{row.label}</span>
+                            <span className={styles.timeChartValue}>{formatDuration(row.value)}</span>
+                          </div>
+                          <div className={styles.timeChartTrack}>
+                            <div
+                              className={`${styles.timeChartBar} ${
+                                index === 0
+                                  ? styles.timeChartBarPrimary
+                                  : index === 1
+                                    ? styles.timeChartBarSecondary
+                                    : styles.timeChartBarAccent
+                              }`}
+                              style={{ width: `${width}%` }}
+                            />
+                          </div>
+                          <span className={styles.timeChartMeta}>{row.note}</span>
+                        </div>
+                      );
+                    })}
                   </div>
 
                   <div className={styles.infoGrid}>
@@ -2675,6 +2651,34 @@ export default function Admin() {
                         {' '}мігрантів на острів = {lab4LargeScaleResult.distributed.migrantsPerIsland}
                       </span>
                     </article>
+                  </div>
+
+                  <div className={styles.timeChartCard}>
+                    <h3 className={styles.subTitle}>Графік часу по островах</h3>
+                    {lab4LargeScaleResult.distributed.islands.map((island, _, collection) => {
+                      const maxValue = Math.max(...collection.map((item) => item.durationMs), 1);
+                      const width = (island.durationMs / maxValue) * 100;
+
+                      return (
+                        <div key={`island-time-${island.islandId}`} className={styles.timeChartRow}>
+                          <div className={styles.timeChartHeader}>
+                            <span className={styles.timeChartLabel}>Острів {island.islandId}</span>
+                            <span className={styles.timeChartValue}>
+                              {formatDuration(island.durationMs)}
+                            </span>
+                          </div>
+                          <div className={styles.timeChartTrack}>
+                            <div
+                              className={`${styles.timeChartBar} ${styles.timeChartBarIsland}`}
+                              style={{ width: `${width}%` }}
+                            />
+                          </div>
+                          <span className={styles.timeChartMeta}>
+                            ΣH = {island.bestSumDistance}, популяція = {island.populationSize}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
 
                   <div className={styles.tableWrap}>
@@ -2717,15 +2721,6 @@ export default function Admin() {
                       </article>
                     ))}
                   </div>
-
-                  <div className={styles.analysisCard}>
-                    <h3 className={styles.subTitle}>Аналіз результатів</h3>
-                    <ul className={styles.analysisList}>
-                      {lab4LargeScaleResult.analysis.map((item, index) => (
-                        <li key={`lab4-analysis-${index}`}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
                 </>
               ) : (
                 <p className={`${styles.sectionText} ${styles.muted}`}>
@@ -2738,6 +2733,8 @@ export default function Admin() {
                 </p>
               )}
             </section>
+              </>
+            )}
 
           </>
         ) : null}
