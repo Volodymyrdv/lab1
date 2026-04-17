@@ -347,6 +347,14 @@
   margin-bottom: 10px;
 }
 
+.expertRankingTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .expertRankingBadge {
   display: inline-flex;
   align-items: center;
@@ -360,11 +368,58 @@
   box-shadow: 0 6px 12px rgba(138, 43, 226, 0.18);
 }
 
+.expertRankingMeta {
+  color: #8a2be2;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
 .expertRankingText {
   margin: 0;
   color: #3f3b4d;
   line-height: 1.75;
   font-size: 1rem;
+}
+
+.expertCountControl {
+  min-width: 180px;
+}
+
+.rankingSequence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rankingSequenceItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #f5ebff 0%, #ffffff 100%);
+  border: 1px solid #dcc6ff;
+  color: #3f3b4d;
+  line-height: 1.4;
+}
+
+.rankingSequenceIndex {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #8a2be2 0%, #a855f7 100%);
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.rankingSequenceMovie {
+  font-size: 0.94rem;
+  font-weight: 600;
 }
 
 .highlightResultCard {
