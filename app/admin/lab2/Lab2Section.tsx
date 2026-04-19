@@ -41,12 +41,14 @@ type ExpertRankingRow = {
 };
 
 type EvolutionResult = {
+  objective: 'min-sum' | 'min-max';
   totalPermutations: number;
   populationSize: number;
   generations: number;
   bestRanking: string[];
   bestSumDistance: number;
-  topRankings: { ranking: string[]; sumDistance: number }[];
+  bestMaxDistance: number;
+  topRankings: { ranking: string[]; sumDistance: number; maxDistance: number }[];
   durationMs: number;
 };
 
@@ -62,7 +64,10 @@ type Lab2SectionProps = {
   lab2ExpertRankings: ExpertRankingRow[];
   lab2ExpertCount: number;
   onLab2ExpertCountChange: (value: number) => void;
+  onRegenerateLab2ExpertRankings: () => void;
   getHeuristicCode: (value: string) => string;
+  lab2FitnessMode: 'min-sum' | 'min-max';
+  onLab2FitnessModeChange: (value: 'min-sum' | 'min-max') => void;
   runEvolutionSearch: () => void;
   isEvolutionRunning: boolean;
   evolutionResult: EvolutionResult | null;
@@ -77,7 +82,10 @@ export function Lab2Section({
   lab2ExpertRankings,
   lab2ExpertCount,
   onLab2ExpertCountChange,
+  onRegenerateLab2ExpertRankings,
   getHeuristicCode,
+  lab2FitnessMode,
+  onLab2FitnessModeChange,
   runEvolutionSearch,
   isEvolutionRunning,
   evolutionResult
@@ -268,27 +276,37 @@ export function Lab2Section({
             </p>
           </div>
 
-          <div className={styles.expertCountControl}>
-            <label htmlFor='lab2-expert-count' className={styles.controlLabel}>
-              Кількість експертів
-            </label>
-            <input
-              id='lab2-expert-count'
-              type='number'
-              min={3}
-              max={30}
-              step={1}
-              value={lab2ExpertCount}
-              onChange={(e) => {
-                const nextValue = Number(e.target.value);
-                if (Number.isNaN(nextValue)) {
-                  return;
-                }
+          <div className={styles.expertControls}>
+            <div className={styles.expertCountControl}>
+              <label htmlFor='lab2-expert-count' className={styles.controlLabel}>
+                Кількість експертів
+              </label>
+              <input
+                id='lab2-expert-count'
+                type='number'
+                min={3}
+                max={30}
+                step={1}
+                value={lab2ExpertCount}
+                onChange={(e) => {
+                  const nextValue = Number(e.target.value);
+                  if (Number.isNaN(nextValue)) {
+                    return;
+                  }
 
-                onLab2ExpertCountChange(Math.min(30, Math.max(3, nextValue)));
-              }}
-              className={baseStyles.input}
-            />
+                  onLab2ExpertCountChange(Math.min(30, Math.max(3, nextValue)));
+                }}
+                className={baseStyles.input}
+              />
+            </div>
+            <button
+              type='button'
+              className={baseStyles.button}
+              onClick={onRegenerateLab2ExpertRankings}
+              disabled={lab2FinalCandidates.length === 0}
+            >
+              Згенерувати нові ранжування
+            </button>
           </div>
         </div>
 
@@ -304,12 +322,7 @@ export function Lab2Section({
                 </div>
 
                 <div className={styles.rankingSequence}>
-                  {row.ranking.map((movie, movieIndex) => (
-                    <span key={`${row.expert}-${movie}`} className={styles.rankingSequenceItem}>
-                      <span className={styles.rankingSequenceIndex}>{movieIndex + 1}</span>
-                      <span className={styles.rankingSequenceMovie}>{movie}</span>
-                    </span>
-                  ))}
+                  <p className={styles.highlightResultText}>{row.ranking.join(' > ')}</p>
                 </div>
               </article>
             ))}
@@ -322,38 +335,75 @@ export function Lab2Section({
       </section>
 
       <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Еволюційні стратегії</h2>
-        <button
-          type='button'
-          className={baseStyles.button}
-          onClick={runEvolutionSearch}
-          disabled={isEvolutionRunning || lab2FinalCandidates.length !== 8}
-        >
-          {isEvolutionRunning ? 'Розрахунок...' : 'Запустити алгоритм'}
-        </button>
+        <h2 className={styles.sectionTitle}>Генетичний алгоритм</h2>
+        <p className={styles.sectionText}>
+          Пошук виконується генетичним алгоритмом з турнірним відбором, кросовером, мутацією та
+          елітизмом.
+        </p>
+        <div className={styles.controlRow}>
+          <div className={baseStyles.inputGroup}>
+            <label htmlFor='lab2-fitness' className={styles.controlLabel}>
+              Фітнес-функція
+            </label>
+            <select
+              id='lab2-fitness'
+              value={lab2FitnessMode}
+              onChange={(e) => onLab2FitnessModeChange(e.target.value as 'min-sum' | 'min-max')}
+              className={styles.select}
+            >
+              <option value='min-sum'>Мінімальна сума відстаней</option>
+              <option value='min-max'>MinMax</option>
+            </select>
+          </div>
+          <button
+            type='button'
+            className={baseStyles.button}
+            onClick={runEvolutionSearch}
+            disabled={isEvolutionRunning || lab2FinalCandidates.length !== 8}
+          >
+            {isEvolutionRunning ? 'Розрахунок...' : 'Запустити генетичний алгоритм'}
+          </button>
+        </div>
         {lab2FinalCandidates.length !== 8 && (
           <p className={`${styles.sectionText} ${styles.muted}`}>
             Для запуску потрібно рівно 8 об&apos;єктів у фінальній підмножині.
           </p>
         )}
         {evolutionResult && (
-          <div className={styles.subSection}>
-            <h3 className={styles.subTitle}>Найкраща перестановка</h3>
-            <p className={styles.sectionText}>Ранжування: {evolutionResult.bestRanking.join(' > ')}</p>
+          <div className={styles.resultCard}>
+            <p className={styles.sectionText}>
+              Фітнес-функція:{' '}
+              {evolutionResult.objective === 'min-sum'
+                ? 'Мінімальна сума відстаней'
+                : 'MinMax'}
+            </p>
+            <p className={styles.sectionText}>
+              Найкраще ранжування: {evolutionResult.bestRanking.join(' > ')}
+            </p>
             <p className={styles.sectionText}>
               Сума відстаней Хемінга: {evolutionResult.bestSumDistance}
             </p>
-            <p className={styles.sectionText}>Розмір популяції: {evolutionResult.populationSize}</p>
-            <p className={styles.sectionText}>Кількість поколінь: {evolutionResult.generations}</p>
+            <p className={styles.sectionText}>
+              Максимальна відстань: {evolutionResult.bestMaxDistance}
+            </p>
+            <p className={styles.sectionText}>
+              Популяція: {evolutionResult.populationSize}, поколінь: {evolutionResult.generations},
+              час: {evolutionResult.durationMs} мс
+            </p>
           </div>
         )}
         {evolutionResult && evolutionResult.topRankings.length > 0 && (
           <div className={styles.subSection}>
-            <h3 className={styles.subTitle}>Топ-40 перестановок</h3>
+            <h3 className={styles.subTitle}>
+              {evolutionResult.objective === 'min-sum'
+                ? 'Рішення з мінімальною сумою відстаней'
+                : 'Рішення з мінімальним значенням Max'}
+            </h3>
             <div className={styles.tableWrap}>
               {evolutionResult.topRankings.map((row, index) => (
                 <p key={`${row.ranking.join('|')}-${index}`} className={styles.sectionText}>
-                  {index + 1}. {row.ranking.join(' > ')} (ΣH = {row.sumDistance})
+                  {index + 1}. {row.ranking.join(' > ')} (сума = {row.sumDistance}, max ={' '}
+                  {row.maxDistance})
                 </p>
               ))}
             </div>

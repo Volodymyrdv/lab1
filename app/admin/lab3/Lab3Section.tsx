@@ -318,7 +318,11 @@ export function Lab3Section({
       </section>
 
       <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Еволюційні стратегії</h2>
+        <h2 className={styles.sectionTitle}>Генетичний алгоритм</h2>
+        <p className={styles.sectionText}>
+          Пошук виконується генетичним алгоритмом з турнірним відбором, кросовером, мутацією та
+          елітизмом.
+        </p>
         <div className={styles.controlRow}>
           <div className={baseStyles.inputGroup}>
             <label htmlFor='lab3-fitness' className={styles.controlLabel}>
@@ -340,7 +344,7 @@ export function Lab3Section({
             onClick={runLab3EvolutionSearch}
             disabled={isLab3EvolutionRunning || lab2FinalCandidates.length !== 8}
           >
-            {isLab3EvolutionRunning ? 'Розрахунок...' : 'Запустити алгоритм'}
+            {isLab3EvolutionRunning ? 'Розрахунок...' : 'Запустити генетичний алгоритм'}
           </button>
         </div>
         {lab2FinalCandidates.length !== 8 && (
@@ -373,7 +377,11 @@ export function Lab3Section({
         )}
         {lab3EvolutionResult && lab3EvolutionResult.topRankings.length > 0 && (
           <div className={styles.subSection}>
-            <h3 className={styles.subTitle}>Топ-40 еволюційного пошуку</h3>
+            <h3 className={styles.subTitle}>
+              {lab3EvolutionResult.objective === 'min-sum'
+                ? 'Рішення з мінімальною сумою відстаней'
+                : 'Рішення з мінімальним значенням Max'}
+            </h3>
             {lab3EvolutionResult.topRankings.map((row, index) => (
               <p
                 key={`lab3-evolution-${row.ranking.join('|')}-${index}`}

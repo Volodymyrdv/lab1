@@ -68,12 +68,14 @@ interface ExpertRankingRow {
 }
 
 interface EvolutionResult {
+  objective: 'min-sum' | 'min-max';
   totalPermutations: number;
   populationSize: number;
   generations: number;
   bestRanking: string[];
   bestSumDistance: number;
-  topRankings: { ranking: string[]; sumDistance: number }[];
+  bestMaxDistance: number;
+  topRankings: { ranking: string[]; sumDistance: number; maxDistance: number }[];
   durationMs: number;
 }
 
@@ -203,28 +205,6 @@ const lab2ScoreMap = {
 
 const getHeuristicCode = (value: string) => getHeuristicByValue(value)?.code ?? value;
 
-const shuffleWithSeed = (items: string[], seed: number) => {
-  const result = [...items];
-  let state = seed % 2147483647;
-  if (state <= 0) {
-    state += 2147483646;
-  }
-
-  for (let index = result.length - 1; index > 0; index -= 1) {
-    state = (state * 48271) % 2147483647;
-    const swapIndex = state % (index + 1);
-    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
-  }
-
-  return result;
-};
-
-const generateExpertRankings = (candidates: string[], count: number): ExpertRankingRow[] =>
-  Array.from({ length: count }).map((_, index) => ({
-    expert: `Експерт ${index + 1}`,
-    ranking: shuffleWithSeed(candidates, 1000 + index * 37)
-  }));
-
 const randomPermutation = (items: string[]) => {
   const result = [...items];
 
@@ -244,12 +224,6 @@ const generateRandomExpertRankings = (candidates: string[], count: number): Expe
 
 const calculateHammingDistanceFull = (ranking: string[], expertRanking: string[]) =>
   ranking.reduce((total, movie, index) => total + (expertRanking[index] === movie ? 0 : 1), 0);
-
-const calculateSumHammingAgainstExperts = (ranking: string[], expertRankings: ExpertRankingRow[]) =>
-  expertRankings.reduce(
-    (total, expertRow) => total + calculateHammingDistanceFull(ranking, expertRow.ranking),
-    0
-  );
 
 const evaluateRankingAgainstExperts = (
   ranking: string[],
@@ -324,26 +298,48 @@ const crossoverChromosomes = (leftParent: string[], rightParent: string[]) => {
   return child;
 };
 
-const tournamentSelect = (
-  population: { chromosome: string[]; sumDistance: number }[],
-  tournamentSize: number
-) => {
-  let best = population[Math.floor(Math.random() * population.length)];
-
-  for (let i = 1; i < tournamentSize; i += 1) {
-    const candidate = population[Math.floor(Math.random() * population.length)];
-    if (candidate.sumDistance < best.sumDistance) {
-      best = candidate;
-    }
-  }
-
-  return best;
-};
-
 const compareEvolutionScores = (left: EvolutionRankingScore, right: EvolutionRankingScore) =>
   left.sumDistance - right.sumDistance ||
   left.maxDistance - right.maxDistance ||
   compareRankingsAlphabetically(left.ranking, right.ranking);
+
+const compareObjectiveScores = (
+  left: EvolutionRankingScore,
+  right: EvolutionRankingScore,
+  objective: 'min-sum' | 'min-max'
+) => {
+  if (objective === 'min-sum') {
+    return (
+      left.sumDistance - right.sumDistance ||
+      left.maxDistance - right.maxDistance ||
+      compareRankingsAlphabetically(left.ranking, right.ranking)
+    );
+  }
+
+  return (
+    left.maxDistance - right.maxDistance ||
+    left.sumDistance - right.sumDistance ||
+    compareRankingsAlphabetically(left.ranking, right.ranking)
+  );
+};
+
+const filterRankingsByBestObjective = (
+  rankings: { ranking: string[]; sumDistance: number; maxDistance: number }[],
+  objective: 'min-sum' | 'min-max'
+) => {
+  if (rankings.length === 0) {
+    return rankings;
+  }
+
+  const bestValue =
+    objective === 'min-sum'
+      ? Math.min(...rankings.map((item) => item.sumDistance))
+      : Math.min(...rankings.map((item) => item.maxDistance));
+
+  return rankings.filter((item) =>
+    objective === 'min-sum' ? item.sumDistance === bestValue : item.maxDistance === bestValue
+  );
+};
 
 const tournamentSelectEvolution = (
   population: EvolutionRankingScore[],
@@ -508,6 +504,8 @@ export default function Admin() {
   const [activeLab, setActiveLab] = useState<'lab1' | 'lab2' | 'lab3' | 'lab4'>('lab1');
   const [message, setMessage] = useState('');
   const [lab2ExpertCount, setLab2ExpertCount] = useState(15);
+  const [lab2ExpertGeneration, setLab2ExpertGeneration] = useState(0);
+  const [lab2FitnessMode, setLab2FitnessMode] = useState<'min-sum' | 'min-max'>('min-sum');
   const [evolutionResult, setEvolutionResult] = useState<EvolutionResult | null>(null);
   const [isEvolutionRunning, setIsEvolutionRunning] = useState(false);
   const [lab3FitnessMode, setLab3FitnessMode] = useState<'min-sum' | 'min-max'>('min-sum');
@@ -708,16 +706,40 @@ export default function Admin() {
     [lab2Analysis.finalSubset]
   );
 
+  const lab2FinalCandidatesSignature = useMemo(
+    () => lab2FinalCandidates.join('|'),
+    [lab2FinalCandidates]
+  );
+  const stableLab2FinalCandidates = useMemo(
+    () => (lab2FinalCandidatesSignature ? lab2FinalCandidatesSignature.split('|') : []),
+    [lab2FinalCandidatesSignature]
+  );
   const lab2ExpertRankings = useMemo(
-    () => generateExpertRankings(lab2FinalCandidates, lab2ExpertCount),
-    [lab2ExpertCount, lab2FinalCandidates]
+    () => {
+      const generationToken = lab2ExpertGeneration;
+
+      return generationToken >= 0
+        ? generateRandomExpertRankings(stableLab2FinalCandidates, lab2ExpertCount)
+        : [];
+    },
+    [lab2ExpertCount, lab2ExpertGeneration, stableLab2FinalCandidates]
   );
 
-  const handleLab2ExpertCountChange = (value: number) => {
-    setLab2ExpertCount(value);
+  const resetLab2DerivedResults = () => {
     setEvolutionResult(null);
     setLab3EvolutionResult(null);
     setLab4DistributedSearch(null);
+  };
+
+  const handleLab2ExpertCountChange = (value: number) => {
+    setLab2ExpertCount(value);
+    setLab2ExpertGeneration((current) => current + 1);
+    resetLab2DerivedResults();
+  };
+
+  const regenerateLab2ExpertRankings = () => {
+    setLab2ExpertGeneration((current) => current + 1);
+    resetLab2DerivedResults();
   };
 
   const lab3MatrixRows = useMemo<Lab3MatrixRow[]>(() => {
@@ -899,12 +921,17 @@ export default function Admin() {
     setEvolutionResult(null);
     const start = Date.now();
     const totalPermutations = factorial(lab2FinalCandidates.length);
-    const populationSize = totalPermutations;
-    const generations = 20;
-    const tournamentSize = 3;
+    const populationSize = Math.min(Math.max(lab2FinalCandidates.length * 12, 48), 160);
+    const generations = 40;
+    const tournamentSize = 4;
     const mutationRate = 0.35;
+    const eliteCount = 4;
 
-    let population = generatePermutations(lab2FinalCandidates);
+    let population = createEvolutionPopulation(
+      lab2FinalCandidates,
+      populationSize,
+      lab2ExpertRankings
+    );
 
     const evaluatePopulation = async (current: string[][]) => {
       const chunkSize = 1000;
@@ -917,15 +944,24 @@ export default function Admin() {
       const evaluatedChunks = await Promise.all(
         chunks.map(
           (chunk) =>
-            new Promise<{ chromosome: string[]; sumDistance: number }[]>((resolve) => {
+            new Promise<{ ranking: string[]; sumDistance: number; maxDistance: number }[]>(
+              (resolve) => {
               setTimeout(() => {
-                const evaluated = chunk.map((chromosome) => ({
-                  chromosome,
-                  sumDistance: calculateSumHammingAgainstExperts(chromosome, lab2ExpertRankings)
-                }));
+                  const evaluated = chunk.map((ranking) => {
+                    const distances = lab2ExpertRankings.map((expertRow) =>
+                      calculateHammingDistanceFull(ranking, expertRow.ranking)
+                    );
+
+                    return {
+                      ranking,
+                      sumDistance: distances.reduce((total, value) => total + value, 0),
+                      maxDistance: Math.max(...distances)
+                    };
+                  });
                 resolve(evaluated);
               }, 0);
-            })
+              }
+            )
         )
       );
 
@@ -934,22 +970,26 @@ export default function Admin() {
 
     let evaluated = await evaluatePopulation(population);
     let best = evaluated[0];
-    let globalTop: { ranking: string[]; sumDistance: number }[] = [];
+    let globalTop: { ranking: string[]; sumDistance: number; maxDistance: number }[] = [];
 
     for (let gen = 1; gen <= generations; gen += 1) {
       for (let i = 1; i < evaluated.length; i += 1) {
-        if (evaluated[i].sumDistance < best.sumDistance) {
+        if (compareObjectiveScores(evaluated[i], best, lab2FitnessMode) < 0) {
           best = evaluated[i];
         }
       }
 
       const currentTop = [...evaluated]
-        .sort((left, right) => left.sumDistance - right.sumDistance)
+        .sort((left, right) => compareObjectiveScores(left, right, lab2FitnessMode))
         .slice(0, 40)
-        .map((item) => ({ ranking: item.chromosome, sumDistance: item.sumDistance }));
+        .map((item) => ({
+          ranking: item.ranking,
+          sumDistance: item.sumDistance,
+          maxDistance: item.maxDistance
+        }));
 
       globalTop = [...globalTop, ...currentTop]
-        .sort((left, right) => left.sumDistance - right.sumDistance)
+        .sort((left, right) => compareObjectiveScores(left, right, lab2FitnessMode))
         .filter(
           (item, index, collection) =>
             collection.findIndex((row) => row.ranking.join('|') === item.ranking.join('|')) ===
@@ -957,25 +997,28 @@ export default function Admin() {
         )
         .slice(0, 40);
 
-      const nextPopulation: string[][] = [];
-      while (nextPopulation.length < populationSize) {
-        const parent = tournamentSelect(evaluated, tournamentSize);
-        const child =
-          Math.random() < mutationRate ? mutateChromosome(parent.chromosome) : parent.chromosome;
-        nextPopulation.push(child);
-      }
-
-      population = nextPopulation;
+      const sortedEvaluated = [...evaluated].sort((left, right) =>
+        compareObjectiveScores(left, right, lab2FitnessMode)
+      );
+      population = evolvePopulationOnce(
+        sortedEvaluated,
+        populationSize,
+        tournamentSize,
+        mutationRate,
+        eliteCount
+      );
       evaluated = await evaluatePopulation(population);
     }
 
     setEvolutionResult({
+      objective: lab2FitnessMode,
       totalPermutations,
       populationSize,
       generations,
-      bestRanking: best.chromosome,
+      bestRanking: best.ranking,
       bestSumDistance: best.sumDistance,
-      topRankings: globalTop,
+      bestMaxDistance: best.maxDistance,
+      topRankings: filterRankingsByBestObjective(globalTop, lab2FitnessMode),
       durationMs: Date.now() - start
     });
     setIsEvolutionRunning(false);
@@ -992,34 +1035,16 @@ export default function Admin() {
 
     const start = Date.now();
     const totalPermutations = factorial(lab2FinalCandidates.length);
-    const populationSize = totalPermutations;
-    const generations = 20;
-    const tournamentSize = 3;
+    const populationSize = Math.min(Math.max(lab2FinalCandidates.length * 12, 48), 160);
+    const generations = 40;
+    const tournamentSize = 4;
     const mutationRate = 0.35;
-    let population = generatePermutations(lab2FinalCandidates);
-
-    const isBetterLab3 = (
-      left: { ranking: string[]; sumDistance: number; maxDistance: number },
-      right: { ranking: string[]; sumDistance: number; maxDistance: number }
-    ) => {
-      if (lab3FitnessMode === 'min-sum') {
-        return (
-          left.sumDistance < right.sumDistance ||
-          (left.sumDistance === right.sumDistance && left.maxDistance < right.maxDistance) ||
-          (left.sumDistance === right.sumDistance &&
-            left.maxDistance === right.maxDistance &&
-            compareRankingsAlphabetically(left.ranking, right.ranking) < 0)
-        );
-      }
-
-      return (
-        left.maxDistance < right.maxDistance ||
-        (left.maxDistance === right.maxDistance && left.sumDistance < right.sumDistance) ||
-        (left.maxDistance === right.maxDistance &&
-          left.sumDistance === right.sumDistance &&
-          compareRankingsAlphabetically(left.ranking, right.ranking) < 0)
-      );
-    };
+    const eliteCount = 4;
+    let population = createEvolutionPopulation(
+      lab2FinalCandidates,
+      populationSize,
+      lab2ExpertRankings
+    );
 
     const evaluatePopulation = async (current: string[][]) => {
       const chunkSize = 1000;
@@ -1057,48 +1082,19 @@ export default function Admin() {
       return evaluatedChunks.flat();
     };
 
-    const pickParent = (
-      populationRows: { ranking: string[]; sumDistance: number; maxDistance: number }[]
-    ) => {
-      let best = populationRows[Math.floor(Math.random() * populationRows.length)];
-
-      for (let i = 1; i < tournamentSize; i += 1) {
-        const candidate = populationRows[Math.floor(Math.random() * populationRows.length)];
-        if (isBetterLab3(candidate, best)) {
-          best = candidate;
-        }
-      }
-
-      return best;
-    };
-
     let evaluated = await evaluatePopulation(population);
     let best = evaluated[0];
     let globalTop: { ranking: string[]; sumDistance: number; maxDistance: number }[] = [];
 
     for (let generation = 1; generation <= generations; generation += 1) {
       for (let i = 1; i < evaluated.length; i += 1) {
-        if (isBetterLab3(evaluated[i], best)) {
+        if (compareObjectiveScores(evaluated[i], best, lab3FitnessMode) < 0) {
           best = evaluated[i];
         }
       }
 
       const currentTop = [...evaluated]
-        .sort((left, right) => {
-          if (lab3FitnessMode === 'min-sum') {
-            return (
-              left.sumDistance - right.sumDistance ||
-              left.maxDistance - right.maxDistance ||
-              compareRankingsAlphabetically(left.ranking, right.ranking)
-            );
-          }
-
-          return (
-            left.maxDistance - right.maxDistance ||
-            left.sumDistance - right.sumDistance ||
-            compareRankingsAlphabetically(left.ranking, right.ranking)
-          );
-        })
+        .sort((left, right) => compareObjectiveScores(left, right, lab3FitnessMode))
         .slice(0, 40)
         .map((item) => ({
           ranking: item.ranking,
@@ -1107,21 +1103,7 @@ export default function Admin() {
         }));
 
       globalTop = [...globalTop, ...currentTop]
-        .sort((left, right) => {
-          if (lab3FitnessMode === 'min-sum') {
-            return (
-              left.sumDistance - right.sumDistance ||
-              left.maxDistance - right.maxDistance ||
-              compareRankingsAlphabetically(left.ranking, right.ranking)
-            );
-          }
-
-          return (
-            left.maxDistance - right.maxDistance ||
-            left.sumDistance - right.sumDistance ||
-            compareRankingsAlphabetically(left.ranking, right.ranking)
-          );
-        })
+        .sort((left, right) => compareObjectiveScores(left, right, lab3FitnessMode))
         .filter(
           (item, index, collection) =>
             collection.findIndex((row) => row.ranking.join('|') === item.ranking.join('|')) ===
@@ -1129,14 +1111,16 @@ export default function Admin() {
         )
         .slice(0, 40);
 
-      const nextPopulation: string[][] = [];
-      while (nextPopulation.length < populationSize) {
-        const parent = pickParent(evaluated);
-        const child = Math.random() < mutationRate ? mutateChromosome(parent.ranking) : parent.ranking;
-        nextPopulation.push(child);
-      }
-
-      population = nextPopulation;
+      const sortedEvaluated = [...evaluated].sort((left, right) =>
+        compareObjectiveScores(left, right, lab3FitnessMode)
+      );
+      population = evolvePopulationOnce(
+        sortedEvaluated,
+        populationSize,
+        tournamentSize,
+        mutationRate,
+        eliteCount
+      );
       evaluated = await evaluatePopulation(population);
     }
 
@@ -1148,7 +1132,7 @@ export default function Admin() {
       bestRanking: best.ranking,
       bestSumDistance: best.sumDistance,
       bestMaxDistance: best.maxDistance,
-      topRankings: globalTop,
+      topRankings: filterRankingsByBestObjective(globalTop, lab3FitnessMode),
       durationMs: Date.now() - start
     });
     setIsLab3EvolutionRunning(false);
@@ -1540,7 +1524,10 @@ export default function Admin() {
             lab2ExpertRankings={lab2ExpertRankings}
             lab2ExpertCount={lab2ExpertCount}
             onLab2ExpertCountChange={handleLab2ExpertCountChange}
+            onRegenerateLab2ExpertRankings={regenerateLab2ExpertRankings}
             getHeuristicCode={getHeuristicCode}
+            lab2FitnessMode={lab2FitnessMode}
+            onLab2FitnessModeChange={setLab2FitnessMode}
             runEvolutionSearch={runEvolutionSearch}
             isEvolutionRunning={isEvolutionRunning}
             evolutionResult={evolutionResult}
