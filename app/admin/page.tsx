@@ -508,6 +508,9 @@ export default function Admin() {
   const [lab2FitnessMode, setLab2FitnessMode] = useState<'min-sum' | 'min-max'>('min-sum');
   const [evolutionResult, setEvolutionResult] = useState<EvolutionResult | null>(null);
   const [isEvolutionRunning, setIsEvolutionRunning] = useState(false);
+  const [lab3ObjectCount, setLab3ObjectCount] = useState(8);
+  const [lab3ExpertCount, setLab3ExpertCount] = useState(15);
+  const [lab3ExpertGeneration, setLab3ExpertGeneration] = useState(0);
   const [lab3FitnessMode, setLab3FitnessMode] = useState<'min-sum' | 'min-max'>('min-sum');
   const [lab3EvolutionResult, setLab3EvolutionResult] = useState<Lab3EvolutionResult | null>(null);
   const [isLab3EvolutionRunning, setIsLab3EvolutionRunning] = useState(false);
@@ -706,6 +709,21 @@ export default function Admin() {
     [lab2Analysis.finalSubset]
   );
 
+  const lab3Candidates = useMemo(
+    () => ratingRows.slice(0, lab3ObjectCount).map((row) => row.movie),
+    [lab3ObjectCount, ratingRows]
+  );
+
+  const lab3CandidateRows = useMemo(
+    () =>
+      ratingRows.map((row, index) => ({
+        rank: index + 1,
+        movie: row.movie,
+        isSelected: index < lab3ObjectCount
+      })),
+    [lab3ObjectCount, ratingRows]
+  );
+
   const lab2FinalCandidatesSignature = useMemo(
     () => lab2FinalCandidates.join('|'),
     [lab2FinalCandidates]
@@ -725,10 +743,30 @@ export default function Admin() {
     [lab2ExpertCount, lab2ExpertGeneration, stableLab2FinalCandidates]
   );
 
-  const resetLab2DerivedResults = () => {
-    setEvolutionResult(null);
+  const lab3CandidatesSignature = useMemo(() => lab3Candidates.join('|'), [lab3Candidates]);
+  const stableLab3Candidates = useMemo(
+    () => (lab3CandidatesSignature ? lab3CandidatesSignature.split('|') : []),
+    [lab3CandidatesSignature]
+  );
+
+  const lab3ExpertRankings = useMemo(
+    () => {
+      const generationToken = lab3ExpertGeneration;
+
+      return generationToken >= 0
+        ? generateRandomExpertRankings(stableLab3Candidates, lab3ExpertCount)
+        : [];
+    },
+    [lab3ExpertCount, lab3ExpertGeneration, stableLab3Candidates]
+  );
+
+  const resetLab3DerivedResults = () => {
     setLab3EvolutionResult(null);
     setLab4DistributedSearch(null);
+  };
+
+  const resetLab2DerivedResults = () => {
+    setEvolutionResult(null);
   };
 
   const handleLab2ExpertCountChange = (value: number) => {
@@ -742,21 +780,38 @@ export default function Admin() {
     resetLab2DerivedResults();
   };
 
+  const handleLab3ExpertCountChange = (value: number) => {
+    setLab3ExpertCount(value);
+    setLab3ExpertGeneration((current) => current + 1);
+    resetLab3DerivedResults();
+  };
+
+  const handleLab3ObjectCountChange = (value: number) => {
+    setLab3ObjectCount(value);
+    setLab3ExpertGeneration((current) => current + 1);
+    resetLab3DerivedResults();
+  };
+
+  const regenerateLab3ExpertRankings = () => {
+    setLab3ExpertGeneration((current) => current + 1);
+    resetLab3DerivedResults();
+  };
+
   const lab3MatrixRows = useMemo<Lab3MatrixRow[]>(() => {
-    if (lab2FinalCandidates.length === 0 || lab2ExpertRankings.length === 0) {
+    if (lab3Candidates.length === 0 || lab3ExpertRankings.length === 0) {
       return [];
     }
 
     return [0, 1, 2].map((comparisonIndex) => ({
       comparison: comparisonIndex + 1,
-      expertValues: lab2ExpertRankings.map((expertRow) => {
+      expertValues: lab3ExpertRankings.map((expertRow) => {
         const movie = expertRow.ranking[comparisonIndex];
-        const candidateIndex = lab2FinalCandidates.findIndex((candidate) => candidate === movie);
+        const candidateIndex = lab3Candidates.findIndex((candidate) => candidate === movie);
 
         return candidateIndex >= 0 ? candidateIndex + 1 : 0;
       })
     }));
-  }, [lab2ExpertRankings, lab2FinalCandidates]);
+  }, [lab3ExpertRankings, lab3Candidates]);
 
   const lab3ExpertHeaders = useMemo(
     () => lab3MatrixRows[0]?.expertValues.map((_, index) => index + 1) ?? [],
@@ -764,16 +819,16 @@ export default function Admin() {
   );
 
   const lab3PreferenceStats = useMemo<Lab3PreferenceStatsRow[]>(() => {
-    if (lab2FinalCandidates.length === 0 || lab2ExpertRankings.length === 0) {
+    if (lab3Candidates.length === 0 || lab3ExpertRankings.length === 0) {
       return [];
     }
 
-    return lab2FinalCandidates.map((movie, index) => {
+    return lab3Candidates.map((movie, index) => {
       let firstCount = 0;
       let secondCount = 0;
       let thirdCount = 0;
 
-      lab2ExpertRankings.forEach((expertRow) => {
+      lab3ExpertRankings.forEach((expertRow) => {
         const rankIndex = expertRow.ranking.findIndex((item) => item === movie);
 
         if (rankIndex === 0) {
@@ -794,36 +849,36 @@ export default function Admin() {
         participationCount: firstCount + secondCount + thirdCount
       };
     });
-  }, [lab2ExpertRankings, lab2FinalCandidates]);
+  }, [lab3ExpertRankings, lab3Candidates]);
 
   const lab3RankMatrixRows = useMemo<Lab3RankMatrixRow[]>(() => {
-    if (lab2FinalCandidates.length === 0 || lab2ExpertRankings.length === 0) {
+    if (lab3Candidates.length === 0 || lab3ExpertRankings.length === 0) {
       return [];
     }
 
-    return lab2FinalCandidates.map((movie, index) => ({
+    return lab3Candidates.map((movie, index) => ({
       candidateNumber: index + 1,
       movie,
-      expertRanks: lab2ExpertRankings.map((expertRow) => {
+      expertRanks: lab3ExpertRankings.map((expertRow) => {
         const rankIndex = expertRow.ranking.findIndex((item) => item === movie);
         return rankIndex >= 0 && rankIndex < 3 ? rankIndex + 1 : 0;
       })
     }));
-  }, [lab2ExpertRankings, lab2FinalCandidates]);
+  }, [lab3ExpertRankings, lab3Candidates]);
 
   const lab3ExhaustiveSearch = useMemo<Lab3ExhaustiveSearchResult | null>(() => {
-    if (lab2FinalCandidates.length !== 8 || lab2ExpertRankings.length === 0) {
+    if (lab3Candidates.length === 0 || lab3ExpertRankings.length === 0) {
       return null;
     }
 
-    const permutations = generatePermutations(lab2FinalCandidates);
+    const permutations = generatePermutations(lab3Candidates);
     let minSumBest: ExhaustiveRankingResult | null = null;
     let minMaxBest: ExhaustiveRankingResult | null = null;
     let minSumTop: ExhaustiveRankingResult[] = [];
     let minMaxTop: ExhaustiveRankingResult[] = [];
 
     permutations.forEach((ranking) => {
-      const distances = lab2ExpertRankings.map((expertRow) =>
+      const distances = lab3ExpertRankings.map((expertRow) =>
         calculateHammingDistanceFull(ranking, expertRow.ranking)
       );
       const sumDistance = distances.reduce((total, value) => total + value, 0);
@@ -889,11 +944,11 @@ export default function Admin() {
       minMaxBest,
       minMaxTop
     };
-  }, [lab2ExpertRankings, lab2FinalCandidates]);
+  }, [lab3ExpertRankings, lab3Candidates]);
 
   const lab4DistributedInputSignature = useMemo(
-    () => `${lab2FinalCandidates.join('|')}::${lab2ExpertRankings.map((row) => row.ranking.join('|')).join('::')}`,
-    [lab2ExpertRankings, lab2FinalCandidates]
+    () => `${lab3Candidates.join('|')}::${lab3ExpertRankings.map((row) => row.ranking.join('|')).join('::')}`,
+    [lab3Candidates, lab3ExpertRankings]
   );
 
   const activeLab4DistributedSearch =
@@ -1025,7 +1080,7 @@ export default function Admin() {
   };
 
   const runLab3EvolutionSearch = async () => {
-    if (lab2FinalCandidates.length !== 8 || lab2ExpertRankings.length === 0) {
+    if (lab3Candidates.length === 0 || lab3ExpertRankings.length === 0) {
       setLab3EvolutionResult(null);
       return;
     }
@@ -1034,16 +1089,16 @@ export default function Admin() {
     setLab3EvolutionResult(null);
 
     const start = Date.now();
-    const totalPermutations = factorial(lab2FinalCandidates.length);
-    const populationSize = Math.min(Math.max(lab2FinalCandidates.length * 12, 48), 160);
+    const totalPermutations = factorial(lab3Candidates.length);
+    const populationSize = Math.min(Math.max(lab3Candidates.length * 12, 48), 160);
     const generations = 40;
     const tournamentSize = 4;
     const mutationRate = 0.35;
     const eliteCount = 4;
     let population = createEvolutionPopulation(
-      lab2FinalCandidates,
+      lab3Candidates,
       populationSize,
-      lab2ExpertRankings
+      lab3ExpertRankings
     );
 
     const evaluatePopulation = async (current: string[][]) => {
@@ -1061,7 +1116,7 @@ export default function Admin() {
               (resolve) => {
                 setTimeout(() => {
                   const evaluated = chunk.map((ranking) => {
-                    const distances = lab2ExpertRankings.map((expertRow) =>
+                    const distances = lab3ExpertRankings.map((expertRow) =>
                       calculateHammingDistanceFull(ranking, expertRow.ranking)
                     );
 
@@ -1139,7 +1194,7 @@ export default function Admin() {
   };
 
   const runLab4DistributedSearch = async () => {
-    if (!lab3ExhaustiveSearch || lab2FinalCandidates.length === 0 || lab2ExpertRankings.length === 0) {
+    if (!lab3ExhaustiveSearch || lab3Candidates.length === 0 || lab3ExpertRankings.length === 0) {
       setLab4DistributedSearch(null);
       return;
     }
@@ -1147,22 +1202,22 @@ export default function Admin() {
     setIsLab4DistributedRunning(true);
     setLab4DistributedSearch(null);
 
-    const workerCount = lab2FinalCandidates.length;
-    const permutationsPerWorker = factorial(Math.max(lab2FinalCandidates.length - 1, 0));
+    const workerCount = lab3Candidates.length;
+    const permutationsPerWorker = factorial(Math.max(lab3Candidates.length - 1, 0));
 
     const chunks: DistributedChunkResult[] = [];
 
-    for (const [workerIndex, fixedFirstMovie] of lab2FinalCandidates.entries()) {
+    for (const [workerIndex, fixedFirstMovie] of lab3Candidates.entries()) {
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      const tailCandidates = lab2FinalCandidates.filter((movie) => movie !== fixedFirstMovie);
+      const tailCandidates = lab3Candidates.filter((movie) => movie !== fixedFirstMovie);
       const tailPermutations = generatePermutations(tailCandidates);
       let minSumBest: ExhaustiveRankingResult | null = null;
       let minMaxBest: ExhaustiveRankingResult | null = null;
 
       tailPermutations.forEach((tailRanking) => {
         const ranking = [fixedFirstMovie, ...tailRanking];
-        const distances = lab2ExpertRankings.map((expertRow) =>
+        const distances = lab3ExpertRankings.map((expertRow) =>
           calculateHammingDistanceFull(ranking, expertRow.ranking)
         );
         const sumDistance = distances.reduce((total, value) => total + value, 0);
@@ -1539,7 +1594,14 @@ export default function Admin() {
             lab3PreferenceStats={lab3PreferenceStats}
             lab3RankMatrixRows={lab3RankMatrixRows}
             lab3ExhaustiveSearch={lab3ExhaustiveSearch}
-            lab2FinalCandidates={lab2FinalCandidates}
+            lab3CandidateRows={lab3CandidateRows}
+            lab3ObjectCount={lab3ObjectCount}
+            onLab3ObjectCountChange={handleLab3ObjectCountChange}
+            lab3ExpertRankings={lab3ExpertRankings}
+            lab3ExpertCount={lab3ExpertCount}
+            onLab3ExpertCountChange={handleLab3ExpertCountChange}
+            onRegenerateLab3ExpertRankings={regenerateLab3ExpertRankings}
+            lab3Candidates={lab3Candidates}
             formatRankingOrderNumbers={formatRankingOrderNumbers}
             lab3FitnessMode={lab3FitnessMode}
             onLab3FitnessModeChange={setLab3FitnessMode}
@@ -1551,7 +1613,7 @@ export default function Admin() {
           <Lab4Section
             lab4View={lab4View}
             onLab4ViewChange={setLab4View}
-            lab2FinalCandidates={lab2FinalCandidates}
+            lab3Candidates={lab3Candidates}
             factorial={factorial}
             isLab4SubsetVisible={isLab4SubsetVisible}
             onToggleLab4SubsetVisible={() => setIsLab4SubsetVisible((current) => !current)}

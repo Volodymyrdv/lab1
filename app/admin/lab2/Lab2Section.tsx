@@ -190,7 +190,9 @@ export function Lab2Section({
                   <td>{row.secondPlace}</td>
                   <td>{row.thirdPlace}</td>
                   <td>{row.totalVotes}</td>
-                  <td>{row.matchedHeuristics.length > 0 ? row.matchedHeuristics.join(', ') : '-'}</td>
+                  <td>
+                    {row.matchedHeuristics.length > 0 ? row.matchedHeuristics.join(', ') : '-'}
+                  </td>
                   <td>{row.isIncluded ? 'Залишився' : `Відсіяно (${row.removedBy})`}</td>
                 </tr>
               ))}
@@ -337,8 +339,7 @@ export function Lab2Section({
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>Генетичний алгоритм</h2>
         <p className={styles.sectionText}>
-          Пошук виконується генетичним алгоритмом з турнірним відбором, кросовером, мутацією та
-          елітизмом.
+          Пошук виконується генетичним алгоритмом з турнірним відбором, кросовером, мутацією.
         </p>
         <div className={styles.controlRow}>
           <div className={baseStyles.inputGroup}>
@@ -373,9 +374,7 @@ export function Lab2Section({
           <div className={styles.resultCard}>
             <p className={styles.sectionText}>
               Фітнес-функція:{' '}
-              {evolutionResult.objective === 'min-sum'
-                ? 'Мінімальна сума відстаней'
-                : 'MinMax'}
+              {evolutionResult.objective === 'min-sum' ? 'Мінімальна сума відстаней' : 'MinMax'}
             </p>
             <p className={styles.sectionText}>
               Найкраще ранжування: {evolutionResult.bestRanking.join(' > ')}

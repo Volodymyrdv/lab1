@@ -20,6 +20,17 @@ type Lab3RankMatrixRow = {
   expertRanks: number[];
 };
 
+type ExpertRankingRow = {
+  expert: string;
+  ranking: string[];
+};
+
+type Lab3CandidateRow = {
+  rank: number;
+  movie: string;
+  isSelected: boolean;
+};
+
 type ExhaustiveRankingResult = {
   ranking: string[];
   distances: number[];
@@ -52,7 +63,14 @@ type Lab3SectionProps = {
   lab3PreferenceStats: Lab3PreferenceStatsRow[];
   lab3RankMatrixRows: Lab3RankMatrixRow[];
   lab3ExhaustiveSearch: Lab3ExhaustiveSearchResult | null;
-  lab2FinalCandidates: string[];
+  lab3CandidateRows: Lab3CandidateRow[];
+  lab3ObjectCount: number;
+  onLab3ObjectCountChange: (value: number) => void;
+  lab3ExpertRankings: ExpertRankingRow[];
+  lab3ExpertCount: number;
+  onLab3ExpertCountChange: (value: number) => void;
+  onRegenerateLab3ExpertRankings: () => void;
+  lab3Candidates: string[];
   formatRankingOrderNumbers: (ranking: string[], candidates: string[]) => string;
   lab3FitnessMode: 'min-sum' | 'min-max';
   onLab3FitnessModeChange: (value: 'min-sum' | 'min-max') => void;
@@ -67,7 +85,14 @@ export function Lab3Section({
   lab3PreferenceStats,
   lab3RankMatrixRows,
   lab3ExhaustiveSearch,
-  lab2FinalCandidates,
+  lab3CandidateRows,
+  lab3ObjectCount,
+  onLab3ObjectCountChange,
+  lab3ExpertRankings,
+  lab3ExpertCount,
+  onLab3ExpertCountChange,
+  onRegenerateLab3ExpertRankings,
+  lab3Candidates,
   formatRankingOrderNumbers,
   lab3FitnessMode,
   onLab3FitnessModeChange,
@@ -79,6 +104,120 @@ export function Lab3Section({
 
   return (
     <>
+      <section className={styles.section}>
+        <div className={styles.sectionHeaderInline}>
+          <div>
+            <h2 className={styles.sectionTitle}>Лабораторна 3 - вибір об&apos;єктів</h2>
+            <p className={styles.sectionText}>
+              Для ЛР3 використовується топ-N об&apos;єктів із рейтингу ЛР1 без урахування балів.
+            </p>
+          </div>
+          <div className={styles.expertControls}>
+            <div className={styles.expertCountControl}>
+              <label htmlFor='lab3-object-count' className={styles.controlLabel}>
+                Кількість об&apos;єктів
+              </label>
+              <input
+                id='lab3-object-count'
+                type='number'
+                min={1}
+                max={20}
+                value={lab3ObjectCount}
+                onChange={(e) =>
+                  onLab3ObjectCountChange(
+                    Math.min(20, Math.max(1, Number.parseInt(e.target.value || '1', 10) || 1))
+                  )
+                }
+                className={baseStyles.input}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Місце</th>
+                <th>Об&apos;єкт</th>
+                <th>Статус</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lab3CandidateRows.map((row) => (
+                <tr key={`lab3-candidate-${row.movie}`}>
+                  <td>{row.rank}</td>
+                  <td>{row.movie}</td>
+                  <td>{row.isSelected ? 'Використовується' : 'Не використовується'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <div className={styles.sectionHeaderInline}>
+          <div>
+            <h2 className={styles.sectionTitle}>Ранжування {lab3ExpertCount} експертів для ЛР3</h2>
+            <p className={styles.sectionText}>
+              Це окремий набір ранжувань для ЛР3, який не залежить від згенерованих експертів у ЛР2.
+            </p>
+          </div>
+          <div className={styles.expertControls}>
+            <div className={styles.expertCountControl}>
+              <label htmlFor='lab3-expert-count' className={styles.controlLabel}>
+                Кількість експертів
+              </label>
+              <input
+                id='lab3-expert-count'
+                type='number'
+                min={1}
+                max={50}
+                value={lab3ExpertCount}
+                onChange={(e) =>
+                  onLab3ExpertCountChange(
+                    Math.min(50, Math.max(1, Number.parseInt(e.target.value || '1', 10) || 1))
+                  )
+                }
+                className={baseStyles.input}
+              />
+            </div>
+            <button
+              type='button'
+              className={baseStyles.button}
+              onClick={onRegenerateLab3ExpertRankings}
+              disabled={lab3Candidates.length === 0}
+            >
+              Згенерувати нові ранжування
+            </button>
+          </div>
+        </div>
+
+        {lab3ExpertRankings.length > 0 ? (
+          <div className={styles.expertRankingGrid}>
+            {lab3ExpertRankings.map((row, index) => (
+              <article key={row.expert} className={styles.expertRankingCard}>
+                <div className={styles.expertRankingTop}>
+                  <div className={styles.expertRankingHeader}>
+                    <span className={styles.expertRankingBadge}>{row.expert}</span>
+                  </div>
+                  <span className={styles.expertRankingMeta}>#{index + 1}</span>
+                </div>
+
+                <div className={styles.rankingSequence}>
+                  <p className={styles.highlightResultText}>{row.ranking.join(' > ')}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className={`${styles.sectionText} ${styles.muted}`}>
+            Немає даних для ранжування експертів у ЛР3.
+          </p>
+        )}
+      </section>
+
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>Множинні порівняння</h2>
         <div className={styles.tableWrap}>
@@ -107,7 +246,7 @@ export function Lab3Section({
                     colSpan={Math.max(lab3ExpertHeaders.length + 1, 2)}
                     className={`${styles.centerCell} ${styles.muted}`}
                   >
-                    Для побудови таблиці потрібні дані з фінальної підмножини ЛР2.
+                    Для побудови таблиці потрібні вибрані об&apos;єкти ЛР3.
                   </td>
                 </tr>
               )}
@@ -155,7 +294,7 @@ export function Lab3Section({
           </div>
         ) : (
           <p className={`${styles.sectionText} ${styles.muted}`}>
-            Для побудови статистики потрібні дані з фінальної підмножини ЛР2.
+            Для побудови статистики потрібні вибрані об&apos;єкти ЛР3.
           </p>
         )}
       </section>
@@ -188,7 +327,7 @@ export function Lab3Section({
                     colSpan={Math.max(lab3ExpertHeaders.length + 1, 2)}
                     className={`${styles.centerCell} ${styles.muted}`}
                   >
-                    Для побудови таблиці потрібні дані з фінальної підмножини ЛР2.
+                    Для побудови таблиці потрібні вибрані об&apos;єкти ЛР3.
                   </td>
                 </tr>
               )}
@@ -237,7 +376,7 @@ export function Lab3Section({
                 <p className={styles.highlightResultOrder}>
                   {formatRankingOrderNumbers(
                     lab3ExhaustiveSearch.minSumTop[0].ranking,
-                    lab2FinalCandidates
+                    lab3Candidates
                   )}
                 </p>
                 <p className={styles.highlightResultText}>
@@ -252,7 +391,8 @@ export function Lab3Section({
           </>
         ) : (
           <p className={`${styles.sectionText} ${styles.muted}`}>
-            Для точного пошуку потрібно рівно 8 об&apos;єктів у фінальній підмножині ЛР2.
+            Для точного пошуку потрібно вибрати хоча б 1 об&apos;єкт і згенерувати ранжування
+            експертів. Зараз вибрано: {lab3ObjectCount}.
           </p>
         )}
       </section>
@@ -297,7 +437,7 @@ export function Lab3Section({
                 <p className={styles.highlightResultOrder}>
                   {formatRankingOrderNumbers(
                     lab3ExhaustiveSearch.minMaxTop[0].ranking,
-                    lab2FinalCandidates
+                    lab3Candidates
                   )}
                 </p>
                 <p className={styles.highlightResultText}>
@@ -312,7 +452,8 @@ export function Lab3Section({
           </>
         ) : (
           <p className={`${styles.sectionText} ${styles.muted}`}>
-            Для точного пошуку потрібно рівно 8 об&apos;єктів у фінальній підмножині ЛР2.
+            Для точного пошуку потрібно вибрати хоча б 1 об&apos;єкт і згенерувати ранжування
+            експертів. Зараз вибрано: {lab3ObjectCount}.
           </p>
         )}
       </section>
@@ -342,14 +483,14 @@ export function Lab3Section({
             type='button'
             className={baseStyles.button}
             onClick={runLab3EvolutionSearch}
-            disabled={isLab3EvolutionRunning || lab2FinalCandidates.length !== 8}
+            disabled={isLab3EvolutionRunning || lab3Candidates.length === 0}
           >
             {isLab3EvolutionRunning ? 'Розрахунок...' : 'Запустити генетичний алгоритм'}
           </button>
         </div>
-        {lab2FinalCandidates.length !== 8 && (
+        {lab3Candidates.length === 0 && (
           <p className={`${styles.sectionText} ${styles.muted}`}>
-            Для запуску потрібно рівно 8 об&apos;єктів у фінальній підмножині.
+            Для запуску потрібно вибрати хоча б 1 об&apos;єкт. Зараз вибрано: {lab3ObjectCount}.
           </p>
         )}
         {lab3EvolutionResult && (

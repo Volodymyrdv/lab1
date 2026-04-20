@@ -65,7 +65,7 @@ type LargeScaleResult = {
 type Lab4SectionProps = {
   lab4View: 'all' | 'classic' | 'large';
   onLab4ViewChange: (value: 'all' | 'classic' | 'large') => void;
-  lab2FinalCandidates: string[];
+  lab3Candidates: string[];
   factorial: (value: number) => number;
   isLab4SubsetVisible: boolean;
   onToggleLab4SubsetVisible: () => void;
@@ -86,7 +86,7 @@ type Lab4SectionProps = {
 export function Lab4Section({
   lab4View,
   onLab4ViewChange,
-  lab2FinalCandidates,
+  lab3Candidates,
   factorial,
   isLab4SubsetVisible,
   onToggleLab4SubsetVisible,
@@ -131,7 +131,7 @@ export function Lab4Section({
         <>
           <section className={styles.section}>
             <h2 className={styles.sectionTitle}>Схема декомпозиції прямого перебору</h2>
-            {lab2FinalCandidates.length > 0 ? (
+            {lab3Candidates.length > 0 ? (
               <>
                 <p className={styles.sectionText}>
                   Для розподіленого перебору фіксую перший елемент перестановки. Кожен
@@ -140,37 +140,37 @@ export function Lab4Section({
                     [a<sub>k</sub>, ...]
                   </span>{' '}
                   і перебирає лише перестановки хвоста з решти{' '}
-                  {Math.max(lab2FinalCandidates.length - 1, 0)} об&apos;єктів.
+                  {Math.max(lab3Candidates.length - 1, 0)} об&apos;єктів.
                 </p>
                 <div className={styles.infoGrid}>
                   <article className={styles.infoCard}>
                     <span className={styles.infoLabel}>Кількість блоків</span>
-                    <strong className={styles.infoValue}>{lab2FinalCandidates.length}</strong>
+                    <strong className={styles.infoValue}>{lab3Candidates.length}</strong>
                   </article>
                   <article className={styles.infoCard}>
                     <span className={styles.infoLabel}>Перестановок у блоці</span>
                     <strong className={styles.infoValue}>
-                      {factorial(Math.max(lab2FinalCandidates.length - 1, 0))}
+                      {factorial(Math.max(lab3Candidates.length - 1, 0))}
                     </strong>
                   </article>
                   <article className={styles.infoCard}>
                     <span className={styles.infoLabel}>Повна потужність</span>
                     <strong className={styles.infoValue}>
-                      {factorial(lab2FinalCandidates.length)}
+                      {factorial(lab3Candidates.length)}
                     </strong>
                   </article>
                 </div>
               </>
             ) : (
               <p className={`${styles.sectionText} ${styles.muted}`}>
-                Спочатку потрібна фінальна підмножина з лабораторної роботи №2.
+                Спочатку потрібен вибраний набір об&apos;єктів із лабораторної роботи №3.
               </p>
             )}
           </section>
 
           <section className={styles.section}>
             <div className={styles.blockHeader}>
-              <h2 className={styles.sectionTitle}>Фінальна підмножина після евристик</h2>
+              <h2 className={styles.sectionTitle}>Вибрані об&apos;єкти для ЛР3</h2>
               <button type='button' className={styles.toggleButton} onClick={onToggleLab4SubsetVisible}>
                 {isLab4SubsetVisible ? 'Приховати блок' : 'Показати блок'}
               </button>
@@ -185,8 +185,8 @@ export function Lab4Section({
                     </tr>
                   </thead>
                   <tbody>
-                    {lab2FinalCandidates.length > 0 ? (
-                      lab2FinalCandidates.map((movie, index) => (
+                    {lab3Candidates.length > 0 ? (
+                      lab3Candidates.map((movie, index) => (
                         <tr key={`lab4-subset-${movie}`}>
                           <td>{index + 1}</td>
                           <td>{movie}</td>
@@ -195,7 +195,7 @@ export function Lab4Section({
                     ) : (
                       <tr>
                         <td colSpan={2} className={`${styles.centerCell} ${styles.muted}`}>
-                          Після застосування евристик об&apos;єкти не залишилися
+                          Для ЛР3 ще не вибрано об&apos;єкти
                         </td>
                       </tr>
                     )}
@@ -232,8 +232,8 @@ export function Lab4Section({
               </div>
             ) : (
               <p className={`${styles.sectionText} ${styles.muted}`}>
-                Для відображення компромісних ранжувань потрібно рівно 8 об&apos;єктів у фінальній
-                підмножині.
+                Для відображення компромісних ранжувань потрібно вибрати об&apos;єкти в ЛР3 і
+                дочекатися результатів точного пошуку.
               </p>
             )}
           </section>
@@ -344,7 +344,7 @@ export function Lab4Section({
             ) : (
               <p className={`${styles.sectionText} ${styles.muted}`}>
                 {!lab3ExhaustiveSearch
-                  ? 'Для запуску потрібно рівно 8 об&apos;єктів у фінальній підмножині та результати точного пошуку з ЛР3.'
+                  ? 'Для запуску потрібно вибрати об&apos;єкти в ЛР3 та отримати результати точного пошуку.'
                   : 'Натисніть кнопку, щоб запустити розподілений прямий перебір перестановок.'}
               </p>
             )}
