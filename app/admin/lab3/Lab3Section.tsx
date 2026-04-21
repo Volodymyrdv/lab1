@@ -40,10 +40,17 @@ type ExhaustiveRankingResult = {
 
 type Lab3ExhaustiveSearchResult = {
   totalPermutations: number;
+  durationMs: number;
   minSumBest: ExhaustiveRankingResult;
   minSumTop: ExhaustiveRankingResult[];
   minMaxBest: ExhaustiveRankingResult;
   minMaxTop: ExhaustiveRankingResult[];
+};
+
+type Lab3ExhaustiveSearchProgress = {
+  processedPermutations: number;
+  totalPermutations: number;
+  durationMs: number;
 };
 
 type Lab3EvolutionResult = {
@@ -63,6 +70,8 @@ type Lab3SectionProps = {
   lab3PreferenceStats: Lab3PreferenceStatsRow[];
   lab3RankMatrixRows: Lab3RankMatrixRow[];
   lab3ExhaustiveSearch: Lab3ExhaustiveSearchResult | null;
+  lab3ExhaustiveSearchProgress: Lab3ExhaustiveSearchProgress | null;
+  isLab3ExhaustiveSearchRunning: boolean;
   lab3CandidateRows: Lab3CandidateRow[];
   lab3ObjectCount: number;
   onLab3ObjectCountChange: (value: number) => void;
@@ -85,6 +94,8 @@ export function Lab3Section({
   lab3PreferenceStats,
   lab3RankMatrixRows,
   lab3ExhaustiveSearch,
+  lab3ExhaustiveSearchProgress,
+  isLab3ExhaustiveSearchRunning,
   lab3CandidateRows,
   lab3ObjectCount,
   onLab3ObjectCountChange,
@@ -101,6 +112,13 @@ export function Lab3Section({
   lab3EvolutionResult
 }: Lab3SectionProps) {
   const expertCount = Math.max(lab3ExpertHeaders.length, 1);
+  const exhaustiveProgressPercent = lab3ExhaustiveSearchProgress
+    ? Math.round(
+        (lab3ExhaustiveSearchProgress.processedPermutations /
+          Math.max(lab3ExhaustiveSearchProgress.totalPermutations, 1)) *
+          100
+      )
+    : 0;
 
   return (
     <>
@@ -338,10 +356,27 @@ export function Lab3Section({
 
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>Пошук мінімальної суми відстаней</h2>
+        {lab3ExhaustiveSearchProgress && (
+          <div className={styles.resultCard}>
+            <p className={styles.sectionText}>
+              Статус: {isLab3ExhaustiveSearchRunning ? 'обрахунок триває' : 'обрахунок завершено'}
+            </p>
+            <p className={styles.sectionText}>
+              Опрацьовано перестановок: {lab3ExhaustiveSearchProgress.processedPermutations} /{' '}
+              {lab3ExhaustiveSearchProgress.totalPermutations} ({exhaustiveProgressPercent}%)
+            </p>
+            <p className={styles.sectionText}>
+              Поточний час: {lab3ExhaustiveSearchProgress.durationMs} мс
+            </p>
+          </div>
+        )}
         {lab3ExhaustiveSearch ? (
           <>
             <p className={styles.sectionText}>
               Перебрано всіх перестановок: {lab3ExhaustiveSearch.totalPermutations}
+            </p>
+            <p className={styles.sectionText}>
+              Час точного перебору: {lab3ExhaustiveSearch.durationMs} мс
             </p>
             <div className={styles.resultCard}>
               <p className={styles.sectionText}>
@@ -391,18 +426,36 @@ export function Lab3Section({
           </>
         ) : (
           <p className={`${styles.sectionText} ${styles.muted}`}>
-            Для точного пошуку потрібно вибрати хоча б 1 об&apos;єкт і згенерувати ранжування
-            експертів. Зараз вибрано: {lab3ObjectCount}.
+            {isLab3ExhaustiveSearchRunning
+              ? 'Точний перебір виконується. Результати з&apos;являться після завершення обрахунку.'
+              : `Для точного пошуку потрібно вибрати хоча б 1 об&apos;єкт і згенерувати ранжування експертів. Зараз вибрано: ${lab3ObjectCount}.`}
           </p>
         )}
       </section>
 
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>Пошук мінімуму максимумів MinMax</h2>
+        {lab3ExhaustiveSearchProgress && (
+          <div className={styles.resultCard}>
+            <p className={styles.sectionText}>
+              Статус: {isLab3ExhaustiveSearchRunning ? 'обрахунок триває' : 'обрахунок завершено'}
+            </p>
+            <p className={styles.sectionText}>
+              Опрацьовано перестановок: {lab3ExhaustiveSearchProgress.processedPermutations} /{' '}
+              {lab3ExhaustiveSearchProgress.totalPermutations} ({exhaustiveProgressPercent}%)
+            </p>
+            <p className={styles.sectionText}>
+              Поточний час: {lab3ExhaustiveSearchProgress.durationMs} мс
+            </p>
+          </div>
+        )}
         {lab3ExhaustiveSearch ? (
           <>
             <p className={styles.sectionText}>
               Перебрано всіх перестановок: {lab3ExhaustiveSearch.totalPermutations}
+            </p>
+            <p className={styles.sectionText}>
+              Час точного перебору: {lab3ExhaustiveSearch.durationMs} мс
             </p>
             <div className={styles.resultCard}>
               <p className={styles.sectionText}>
@@ -452,8 +505,9 @@ export function Lab3Section({
           </>
         ) : (
           <p className={`${styles.sectionText} ${styles.muted}`}>
-            Для точного пошуку потрібно вибрати хоча б 1 об&apos;єкт і згенерувати ранжування
-            експертів. Зараз вибрано: {lab3ObjectCount}.
+            {isLab3ExhaustiveSearchRunning
+              ? 'Точний перебір виконується. Результати з&apos;являться після завершення обрахунку.'
+              : `Для точного пошуку потрібно вибрати хоча б 1 об&apos;єкт і згенерувати ранжування експертів. Зараз вибрано: ${lab3ObjectCount}.`}
           </p>
         )}
       </section>
@@ -461,8 +515,7 @@ export function Lab3Section({
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>Генетичний алгоритм</h2>
         <p className={styles.sectionText}>
-          Пошук виконується генетичним алгоритмом з турнірним відбором, кросовером, мутацією та
-          елітизмом.
+          Пошук виконується генетичним алгоритмом з турнірним відбором, кросовером, мутацією
         </p>
         <div className={styles.controlRow}>
           <div className={baseStyles.inputGroup}>
@@ -497,9 +550,7 @@ export function Lab3Section({
           <div className={styles.resultCard}>
             <p className={styles.sectionText}>
               Фітнес-функція:{' '}
-              {lab3EvolutionResult.objective === 'min-sum'
-                ? 'Мінімальна сума відстаней'
-                : 'MinMax'}
+              {lab3EvolutionResult.objective === 'min-sum' ? 'Мінімальна сума відстаней' : 'MinMax'}
             </p>
             <p className={styles.sectionText}>
               Найкраще ранжування: {lab3EvolutionResult.bestRanking.join(' > ')}

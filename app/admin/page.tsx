@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import baseStyles from '../page.module.css';
 import styles from './admin.module.css';
 import { movies } from '@/lib/movies';
@@ -108,10 +108,17 @@ interface ExhaustiveRankingResult {
 
 interface Lab3ExhaustiveSearchResult {
   totalPermutations: number;
+  durationMs: number;
   minSumBest: ExhaustiveRankingResult;
   minSumTop: ExhaustiveRankingResult[];
   minMaxBest: ExhaustiveRankingResult;
   minMaxTop: ExhaustiveRankingResult[];
+}
+
+interface Lab3ExhaustiveSearchProgress {
+  processedPermutations: number;
+  totalPermutations: number;
+  durationMs: number;
 }
 
 interface Lab3EvolutionResult {
@@ -237,6 +244,146 @@ const evaluateRankingAgainstExperts = (
     ranking,
     sumDistance: distances.reduce((total, value) => total + value, 0),
     maxDistance: Math.max(...distances)
+  };
+};
+
+const delayToMainThread = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+const computeLab3ExhaustiveSearchAsync = async (
+  candidates: string[],
+  expertRankings: ExpertRankingRow[],
+  onProgress: (progress: Lab3ExhaustiveSearchProgress) => void,
+  shouldStop: () => boolean
+): Promise<Lab3ExhaustiveSearchResult | null> => {
+  if (candidates.length === 0 || expertRankings.length === 0) {
+    return null;
+  }
+
+  const totalPermutations = factorial(candidates.length);
+  const startedAt = performance.now();
+  const currentRanking: string[] = [];
+  const used = Array.from({ length: candidates.length }, () => false);
+  const progressChunkSize = 500;
+  let processedPermutations = 0;
+  let operationsSinceYield = 0;
+  let minSumBest: ExhaustiveRankingResult | null = null;
+  let minMaxBest: ExhaustiveRankingResult | null = null;
+  let minSumTop: ExhaustiveRankingResult[] = [];
+  let minMaxTop: ExhaustiveRankingResult[] = [];
+
+  const evaluateCurrentRanking = () => {
+    const ranking = [...currentRanking];
+    const distances = expertRankings.map((expertRow) =>
+      calculateHammingDistanceFull(ranking, expertRow.ranking)
+    );
+    const sumDistance = distances.reduce((total, value) => total + value, 0);
+    const maxDistance = Math.max(...distances);
+    const candidate = {
+      ranking,
+      distances,
+      sumDistance,
+      maxDistance
+    };
+
+    if (
+      !minSumBest ||
+      sumDistance < minSumBest.sumDistance ||
+      (sumDistance === minSumBest.sumDistance && maxDistance < minSumBest.maxDistance) ||
+      (sumDistance === minSumBest.sumDistance &&
+        maxDistance === minSumBest.maxDistance &&
+        compareRankingsAlphabetically(ranking, minSumBest.ranking) < 0)
+    ) {
+      minSumBest = candidate;
+    }
+
+    if (
+      !minMaxBest ||
+      maxDistance < minMaxBest.maxDistance ||
+      (maxDistance === minMaxBest.maxDistance && sumDistance < minMaxBest.sumDistance) ||
+      (maxDistance === minMaxBest.maxDistance &&
+        sumDistance === minMaxBest.sumDistance &&
+        compareRankingsAlphabetically(ranking, minMaxBest.ranking) < 0)
+    ) {
+      minMaxBest = candidate;
+    }
+
+    minSumTop = insertTopResult(
+      minSumTop,
+      candidate,
+      (left, right) =>
+        left.sumDistance - right.sumDistance ||
+        left.maxDistance - right.maxDistance ||
+        compareRankingsAlphabetically(left.ranking, right.ranking),
+      10
+    );
+
+    minMaxTop = insertTopResult(
+      minMaxTop,
+      candidate,
+      (left, right) =>
+        left.maxDistance - right.maxDistance ||
+        left.sumDistance - right.sumDistance ||
+        compareRankingsAlphabetically(left.ranking, right.ranking),
+      10
+    );
+  };
+
+  const traverse = async (depth: number): Promise<void> => {
+    if (shouldStop()) {
+      return;
+    }
+
+    if (depth === candidates.length) {
+      evaluateCurrentRanking();
+      processedPermutations += 1;
+      operationsSinceYield += 1;
+
+      if (
+        processedPermutations === totalPermutations ||
+        operationsSinceYield >= progressChunkSize
+      ) {
+        onProgress({
+          processedPermutations,
+          totalPermutations,
+          durationMs: Math.round(performance.now() - startedAt)
+        });
+        operationsSinceYield = 0;
+        await delayToMainThread();
+      }
+
+      return;
+    }
+
+    for (let index = 0; index < candidates.length; index += 1) {
+      if (used[index]) {
+        continue;
+      }
+
+      used[index] = true;
+      currentRanking.push(candidates[index]);
+      await traverse(depth + 1);
+      currentRanking.pop();
+      used[index] = false;
+
+      if (shouldStop()) {
+        return;
+      }
+    }
+  };
+
+  await traverse(0);
+
+  if (shouldStop() || !minSumBest || !minMaxBest) {
+    return null;
+  }
+
+  return {
+    totalPermutations,
+    durationMs: Math.round(performance.now() - startedAt),
+    minSumBest,
+    minSumTop,
+    minMaxBest,
+    minMaxTop
   };
 };
 
@@ -512,6 +659,12 @@ export default function Admin() {
   const [lab3ExpertCount, setLab3ExpertCount] = useState(15);
   const [lab3ExpertGeneration, setLab3ExpertGeneration] = useState(0);
   const [lab3FitnessMode, setLab3FitnessMode] = useState<'min-sum' | 'min-max'>('min-sum');
+  const [lab3ExhaustiveSearch, setLab3ExhaustiveSearch] = useState<Lab3ExhaustiveSearchResult | null>(
+    null
+  );
+  const [lab3ExhaustiveSearchProgress, setLab3ExhaustiveSearchProgress] =
+    useState<Lab3ExhaustiveSearchProgress | null>(null);
+  const [isLab3ExhaustiveSearchRunning, setIsLab3ExhaustiveSearchRunning] = useState(false);
   const [lab3EvolutionResult, setLab3EvolutionResult] = useState<Lab3EvolutionResult | null>(null);
   const [isLab3EvolutionRunning, setIsLab3EvolutionRunning] = useState(false);
   const [lab4DistributedSearch, setLab4DistributedSearch] = useState<DistributedSearchResult | null>(
@@ -759,8 +912,22 @@ export default function Admin() {
     },
     [lab3ExpertCount, lab3ExpertGeneration, stableLab3Candidates]
   );
+  const lab3ExpertRankingsSignature = useMemo(
+    () => lab3ExpertRankings.map((row) => `${row.expert}:${row.ranking.join('|')}`).join('::'),
+    [lab3ExpertRankings]
+  );
+  const lab3ExhaustiveSearchInputSignature = useMemo(
+    () => `${lab3CandidatesSignature}::${lab3ExpertRankingsSignature}`,
+    [lab3CandidatesSignature, lab3ExpertRankingsSignature]
+  );
+  const completedLab3ExhaustiveSearchSignatureRef = useRef<string | null>(null);
+  const activeLab3ExhaustiveSearchSignatureRef = useRef<string | null>(null);
 
   const resetLab3DerivedResults = () => {
+    completedLab3ExhaustiveSearchSignatureRef.current = null;
+    activeLab3ExhaustiveSearchSignatureRef.current = null;
+    setLab3ExhaustiveSearch(null);
+    setLab3ExhaustiveSearchProgress(null);
     setLab3EvolutionResult(null);
     setLab4DistributedSearch(null);
   };
@@ -811,7 +978,7 @@ export default function Admin() {
         return candidateIndex >= 0 ? candidateIndex + 1 : 0;
       })
     }));
-  }, [lab3ExpertRankings, lab3Candidates]);
+  }, [lab3CandidatesSignature, lab3ExpertRankingsSignature]);
 
   const lab3ExpertHeaders = useMemo(
     () => lab3MatrixRows[0]?.expertValues.map((_, index) => index + 1) ?? [],
@@ -866,85 +1033,80 @@ export default function Admin() {
     }));
   }, [lab3ExpertRankings, lab3Candidates]);
 
-  const lab3ExhaustiveSearch = useMemo<Lab3ExhaustiveSearchResult | null>(() => {
-    if (lab3Candidates.length === 0 || lab3ExpertRankings.length === 0) {
-      return null;
-    }
+  useEffect(() => {
+    let isCancelled = false;
+    const currentInputSignature = lab3ExhaustiveSearchInputSignature;
 
-    const permutations = generatePermutations(lab3Candidates);
-    let minSumBest: ExhaustiveRankingResult | null = null;
-    let minMaxBest: ExhaustiveRankingResult | null = null;
-    let minSumTop: ExhaustiveRankingResult[] = [];
-    let minMaxTop: ExhaustiveRankingResult[] = [];
-
-    permutations.forEach((ranking) => {
-      const distances = lab3ExpertRankings.map((expertRow) =>
-        calculateHammingDistanceFull(ranking, expertRow.ranking)
-      );
-      const sumDistance = distances.reduce((total, value) => total + value, 0);
-      const maxDistance = Math.max(...distances);
-      const candidate = {
-        ranking: [...ranking],
-        distances,
-        sumDistance,
-        maxDistance
-      };
-
-      if (
-        !minSumBest ||
-        sumDistance < minSumBest.sumDistance ||
-        (sumDistance === minSumBest.sumDistance && maxDistance < minSumBest.maxDistance) ||
-        (sumDistance === minSumBest.sumDistance &&
-          maxDistance === minSumBest.maxDistance &&
-          compareRankingsAlphabetically(ranking, minSumBest.ranking) < 0)
-      ) {
-        minSumBest = candidate;
+    const runExhaustiveSearch = async () => {
+      if (lab3Candidates.length === 0 || lab3ExpertRankings.length === 0) {
+        completedLab3ExhaustiveSearchSignatureRef.current = null;
+        activeLab3ExhaustiveSearchSignatureRef.current = null;
+        setLab3ExhaustiveSearch(null);
+        setLab3ExhaustiveSearchProgress(null);
+        setIsLab3ExhaustiveSearchRunning(false);
+        return;
       }
 
       if (
-        !minMaxBest ||
-        maxDistance < minMaxBest.maxDistance ||
-        (maxDistance === minMaxBest.maxDistance && sumDistance < minMaxBest.sumDistance) ||
-        (maxDistance === minMaxBest.maxDistance &&
-          sumDistance === minMaxBest.sumDistance &&
-          compareRankingsAlphabetically(ranking, minMaxBest.ranking) < 0)
+        completedLab3ExhaustiveSearchSignatureRef.current === currentInputSignature
       ) {
-        minMaxBest = candidate;
+        setIsLab3ExhaustiveSearchRunning(false);
+        return;
       }
 
-      minSumTop = insertTopResult(
-        minSumTop,
-        candidate,
-        (left, right) =>
-          left.sumDistance - right.sumDistance ||
-          left.maxDistance - right.maxDistance ||
-          compareRankingsAlphabetically(left.ranking, right.ranking),
-        10
+      if (activeLab3ExhaustiveSearchSignatureRef.current === currentInputSignature) {
+        return;
+      }
+
+      activeLab3ExhaustiveSearchSignatureRef.current = currentInputSignature;
+
+      setLab3ExhaustiveSearch(null);
+      setLab3ExhaustiveSearchProgress({
+        processedPermutations: 0,
+        totalPermutations: factorial(lab3Candidates.length),
+        durationMs: 0
+      });
+      setIsLab3ExhaustiveSearchRunning(true);
+
+      const result = await computeLab3ExhaustiveSearchAsync(
+        lab3Candidates,
+        lab3ExpertRankings,
+        (progress) => {
+          if (!isCancelled) {
+            setLab3ExhaustiveSearchProgress(progress);
+          }
+        },
+        () => isCancelled
       );
 
-      minMaxTop = insertTopResult(
-        minMaxTop,
-        candidate,
-        (left, right) =>
-          left.maxDistance - right.maxDistance ||
-          left.sumDistance - right.sumDistance ||
-          compareRankingsAlphabetically(left.ranking, right.ranking),
-        10
+      if (isCancelled) {
+        return;
+      }
+
+      activeLab3ExhaustiveSearchSignatureRef.current = null;
+      completedLab3ExhaustiveSearchSignatureRef.current = result ? currentInputSignature : null;
+      setLab3ExhaustiveSearch(result);
+      setLab3ExhaustiveSearchProgress(
+        result
+          ? {
+              processedPermutations: result.totalPermutations,
+              totalPermutations: result.totalPermutations,
+              durationMs: result.durationMs
+            }
+          : null
       );
-    });
-
-    if (!minSumBest || !minMaxBest) {
-      return null;
-    }
-
-    return {
-      totalPermutations: permutations.length,
-      minSumBest,
-      minSumTop,
-      minMaxBest,
-      minMaxTop
+      setIsLab3ExhaustiveSearchRunning(false);
     };
-  }, [lab3ExpertRankings, lab3Candidates]);
+
+    runExhaustiveSearch();
+
+    return () => {
+      isCancelled = true;
+      if (activeLab3ExhaustiveSearchSignatureRef.current === currentInputSignature) {
+        activeLab3ExhaustiveSearchSignatureRef.current = null;
+      }
+    };
+  }, [lab3ExhaustiveSearchInputSignature]);
 
   const lab4DistributedInputSignature = useMemo(
     () => `${lab3Candidates.join('|')}::${lab3ExpertRankings.map((row) => row.ranking.join('|')).join('::')}`,
@@ -1594,6 +1756,8 @@ export default function Admin() {
             lab3PreferenceStats={lab3PreferenceStats}
             lab3RankMatrixRows={lab3RankMatrixRows}
             lab3ExhaustiveSearch={lab3ExhaustiveSearch}
+            lab3ExhaustiveSearchProgress={lab3ExhaustiveSearchProgress}
+            isLab3ExhaustiveSearchRunning={isLab3ExhaustiveSearchRunning}
             lab3CandidateRows={lab3CandidateRows}
             lab3ObjectCount={lab3ObjectCount}
             onLab3ObjectCountChange={handleLab3ObjectCountChange}
