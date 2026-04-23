@@ -133,69 +133,10 @@ interface Lab3EvolutionResult {
   durationMs: number;
 }
 
-interface DistributedChunkResult {
-  workerId: number;
-  fixedFirstMovie: string;
-  permutationCount: number;
-  minSumBest: ExhaustiveRankingResult;
-  minMaxBest: ExhaustiveRankingResult;
-}
-
-interface DistributedSearchResult {
-  inputSignature: string;
-  workerCount: number;
-  permutationsPerWorker: number;
-  totalPermutations: number;
-  chunks: DistributedChunkResult[];
-  globalMinSum: ExhaustiveRankingResult;
-  globalMinMax: ExhaustiveRankingResult;
-  matchesLab3MinSum: boolean;
-  matchesLab3MinMax: boolean;
-}
-
 interface EvolutionRankingScore {
   ranking: string[];
   sumDistance: number;
   maxDistance: number;
-}
-
-interface LargeScaleEvolutionSummary {
-  mode: 'simple' | 'island';
-  objective: 'min-sum';
-  populationSize: number;
-  generations: number;
-  bestRanking: string[];
-  bestSumDistance: number;
-  bestMaxDistance: number;
-  durationMs: number;
-}
-
-interface LargeScaleIslandSummary {
-  islandId: number;
-  populationSize: number;
-  durationMs: number;
-  bestRanking: string[];
-  bestSumDistance: number;
-  bestMaxDistance: number;
-}
-
-interface LargeScaleDistributedSummary extends LargeScaleEvolutionSummary {
-  islandCount: number;
-  islands: LargeScaleIslandSummary[];
-  estimatedParallelDurationMs: number;
-  migrationInterval: number;
-  migrantsPerIsland: number;
-}
-
-interface LargeScaleExperimentResult {
-  alternativeCount: number;
-  expertCount: number;
-  candidates: string[];
-  expertRankings: ExpertRankingRow[];
-  simple: LargeScaleEvolutionSummary;
-  distributed: LargeScaleDistributedSummary;
-  estimatedSpeedup: number;
-  qualityDelta: number;
 }
 
 const lab1ScoreMap = {
@@ -231,21 +172,6 @@ const generateRandomExpertRankings = (candidates: string[], count: number): Expe
 
 const calculateHammingDistanceFull = (ranking: string[], expertRanking: string[]) =>
   ranking.reduce((total, movie, index) => total + (expertRanking[index] === movie ? 0 : 1), 0);
-
-const evaluateRankingAgainstExperts = (
-  ranking: string[],
-  expertRankings: ExpertRankingRow[]
-): EvolutionRankingScore => {
-  const distances = expertRankings.map((expertRow) =>
-    calculateHammingDistanceFull(ranking, expertRow.ranking)
-  );
-
-  return {
-    ranking,
-    sumDistance: distances.reduce((total, value) => total + value, 0),
-    maxDistance: Math.max(...distances)
-  };
-};
 
 const delayToMainThread = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -568,38 +494,6 @@ const evolvePopulationOnce = (
   return nextPopulation;
 };
 
-const yieldToBrowser = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-
-const formatDuration = (durationMs: number) =>
-  durationMs >= 1000 ? `${(durationMs / 1000).toFixed(2)} с` : `${durationMs} мс`;
-
-const generatePermutations = (items: string[]) => {
-  const result: string[][] = [];
-  const working = [...items];
-  const c = new Array(working.length).fill(0);
-
-  result.push([...working]);
-  let i = 0;
-
-  while (i < working.length) {
-    if (c[i] < i) {
-      if (i % 2 === 0) {
-        [working[0], working[i]] = [working[i], working[0]];
-      } else {
-        [working[c[i]], working[i]] = [working[i], working[c[i]]];
-      }
-      result.push([...working]);
-      c[i] += 1;
-      i = 0;
-    } else {
-      c[i] = 0;
-      i += 1;
-    }
-  }
-
-  return result;
-};
-
 const matchesHeuristic = (row: StructureRow, code: string) => {
   switch (code) {
     case 'E1':
@@ -667,18 +561,6 @@ export default function Admin() {
   const [isLab3ExhaustiveSearchRunning, setIsLab3ExhaustiveSearchRunning] = useState(false);
   const [lab3EvolutionResult, setLab3EvolutionResult] = useState<Lab3EvolutionResult | null>(null);
   const [isLab3EvolutionRunning, setIsLab3EvolutionRunning] = useState(false);
-  const [lab4DistributedSearch, setLab4DistributedSearch] = useState<DistributedSearchResult | null>(
-    null
-  );
-  const [isLab4DistributedRunning, setIsLab4DistributedRunning] = useState(false);
-  const [lab4LargeExpertCount, setLab4LargeExpertCount] = useState(30);
-  const [lab4IslandCount, setLab4IslandCount] = useState(2);
-  const [lab4LargeScaleResult, setLab4LargeScaleResult] = useState<LargeScaleExperimentResult | null>(
-    null
-  );
-  const [isLab4LargeScaleRunning, setIsLab4LargeScaleRunning] = useState(false);
-  const [lab4View, setLab4View] = useState<'all' | 'classic' | 'large'>('all');
-  const [isLab4SubsetVisible, setIsLab4SubsetVisible] = useState(true);
 
   useEffect(() => {
     if (!isLoggedIn) {
@@ -929,7 +811,6 @@ export default function Admin() {
     setLab3ExhaustiveSearch(null);
     setLab3ExhaustiveSearchProgress(null);
     setLab3EvolutionResult(null);
-    setLab4DistributedSearch(null);
   };
 
   const resetLab2DerivedResults = () => {
@@ -1107,16 +988,6 @@ export default function Admin() {
       }
     };
   }, [lab3ExhaustiveSearchInputSignature]);
-
-  const lab4DistributedInputSignature = useMemo(
-    () => `${lab3Candidates.join('|')}::${lab3ExpertRankings.map((row) => row.ranking.join('|')).join('::')}`,
-    [lab3Candidates, lab3ExpertRankings]
-  );
-
-  const activeLab4DistributedSearch =
-    lab4DistributedSearch?.inputSignature === lab4DistributedInputSignature
-      ? lab4DistributedSearch
-      : null;
 
   const runEvolutionSearch = async () => {
     if (lab2FinalCandidates.length === 0) {
@@ -1355,293 +1226,6 @@ export default function Admin() {
     setIsLab3EvolutionRunning(false);
   };
 
-  const runLab4DistributedSearch = async () => {
-    if (!lab3ExhaustiveSearch || lab3Candidates.length === 0 || lab3ExpertRankings.length === 0) {
-      setLab4DistributedSearch(null);
-      return;
-    }
-
-    setIsLab4DistributedRunning(true);
-    setLab4DistributedSearch(null);
-
-    const workerCount = lab3Candidates.length;
-    const permutationsPerWorker = factorial(Math.max(lab3Candidates.length - 1, 0));
-
-    const chunks: DistributedChunkResult[] = [];
-
-    for (const [workerIndex, fixedFirstMovie] of lab3Candidates.entries()) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-
-      const tailCandidates = lab3Candidates.filter((movie) => movie !== fixedFirstMovie);
-      const tailPermutations = generatePermutations(tailCandidates);
-      let minSumBest: ExhaustiveRankingResult | null = null;
-      let minMaxBest: ExhaustiveRankingResult | null = null;
-
-      tailPermutations.forEach((tailRanking) => {
-        const ranking = [fixedFirstMovie, ...tailRanking];
-        const distances = lab3ExpertRankings.map((expertRow) =>
-          calculateHammingDistanceFull(ranking, expertRow.ranking)
-        );
-        const sumDistance = distances.reduce((total, value) => total + value, 0);
-        const maxDistance = Math.max(...distances);
-        const candidate = {
-          ranking,
-          distances,
-          sumDistance,
-          maxDistance
-        };
-
-        if (
-          !minSumBest ||
-          sumDistance < minSumBest.sumDistance ||
-          (sumDistance === minSumBest.sumDistance && maxDistance < minSumBest.maxDistance) ||
-          (sumDistance === minSumBest.sumDistance &&
-            maxDistance === minSumBest.maxDistance &&
-            compareRankingsAlphabetically(ranking, minSumBest.ranking) < 0)
-        ) {
-          minSumBest = candidate;
-        }
-
-        if (
-          !minMaxBest ||
-          maxDistance < minMaxBest.maxDistance ||
-          (maxDistance === minMaxBest.maxDistance && sumDistance < minMaxBest.sumDistance) ||
-          (maxDistance === minMaxBest.maxDistance &&
-            sumDistance === minMaxBest.sumDistance &&
-            compareRankingsAlphabetically(ranking, minMaxBest.ranking) < 0)
-        ) {
-          minMaxBest = candidate;
-        }
-      });
-
-      chunks.push({
-        workerId: workerIndex + 1,
-        fixedFirstMovie,
-        permutationCount: tailPermutations.length,
-        minSumBest: minSumBest ?? {
-          ranking: [],
-          distances: [],
-          sumDistance: Number.POSITIVE_INFINITY,
-          maxDistance: Number.POSITIVE_INFINITY
-        },
-        minMaxBest: minMaxBest ?? {
-          ranking: [],
-          distances: [],
-          sumDistance: Number.POSITIVE_INFINITY,
-          maxDistance: Number.POSITIVE_INFINITY
-        }
-      });
-    }
-
-    const globalMinSum = [...chunks]
-      .map((chunk) => chunk.minSumBest)
-      .sort(
-        (left, right) =>
-          left.sumDistance - right.sumDistance ||
-          left.maxDistance - right.maxDistance ||
-          compareRankingsAlphabetically(left.ranking, right.ranking)
-      )[0];
-
-    const globalMinMax = [...chunks]
-      .map((chunk) => chunk.minMaxBest)
-      .sort(
-        (left, right) =>
-          left.maxDistance - right.maxDistance ||
-          left.sumDistance - right.sumDistance ||
-          compareRankingsAlphabetically(left.ranking, right.ranking)
-      )[0];
-
-    setLab4DistributedSearch({
-      inputSignature: lab4DistributedInputSignature,
-      workerCount,
-      permutationsPerWorker,
-      totalPermutations: chunks.reduce((total, chunk) => total + chunk.permutationCount, 0),
-      chunks,
-      globalMinSum,
-      globalMinMax,
-      matchesLab3MinSum:
-        globalMinSum.ranking.join('|') === lab3ExhaustiveSearch.minSumBest.ranking.join('|'),
-      matchesLab3MinMax:
-        globalMinMax.ranking.join('|') === lab3ExhaustiveSearch.minMaxBest.ranking.join('|')
-    });
-    setIsLab4DistributedRunning(false);
-  };
-
-  const runLab4LargeScaleExperiment = async () => {
-    setIsLab4LargeScaleRunning(true);
-    setLab4LargeScaleResult(null);
-
-    const candidates = [...movies];
-    const expertRankings = generateRandomExpertRankings(candidates, lab4LargeExpertCount);
-    const generations = 36;
-    const totalPopulation = 96;
-    const tournamentSize = 4;
-    const mutationRate = 0.32;
-    const eliteCount = 4;
-    const migrationInterval = 6;
-    const migrantsPerIsland = 2;
-
-    const evaluatePopulation = async (population: string[][]) => {
-      const chunkSize = 16;
-      const evaluated: EvolutionRankingScore[] = [];
-
-      for (let index = 0; index < population.length; index += chunkSize) {
-        const chunk = population.slice(index, index + chunkSize);
-        evaluated.push(
-          ...chunk.map((ranking) => evaluateRankingAgainstExperts(ranking, expertRankings))
-        );
-        await yieldToBrowser();
-      }
-
-      return evaluated;
-    };
-
-    const simplePopulationSize = totalPopulation;
-    let simplePopulation = createEvolutionPopulation(candidates, simplePopulationSize, expertRankings);
-    let simpleBest: EvolutionRankingScore | null = null;
-    const simpleStart = Date.now();
-
-    for (let generation = 0; generation < generations; generation += 1) {
-      const evaluated = await evaluatePopulation(simplePopulation);
-      const generationBest = [...evaluated].sort(compareEvolutionScores)[0];
-
-      if (!simpleBest || compareEvolutionScores(generationBest, simpleBest) < 0) {
-        simpleBest = generationBest;
-      }
-
-      simplePopulation = evolvePopulationOnce(
-        evaluated,
-        simplePopulationSize,
-        tournamentSize,
-        mutationRate,
-        eliteCount
-      );
-    }
-
-    const simpleDurationMs = Date.now() - simpleStart;
-    const simpleResult: LargeScaleEvolutionSummary = {
-      mode: 'simple',
-      objective: 'min-sum',
-      populationSize: simplePopulationSize,
-      generations,
-      bestRanking: simpleBest?.ranking ?? [],
-      bestSumDistance: simpleBest?.sumDistance ?? Number.POSITIVE_INFINITY,
-      bestMaxDistance: simpleBest?.maxDistance ?? Number.POSITIVE_INFINITY,
-      durationMs: simpleDurationMs
-    };
-
-    const islandPopulationSize = Math.max(24, Math.floor(totalPopulation / lab4IslandCount));
-    let islandPopulations = Array.from({ length: lab4IslandCount }, () =>
-      createEvolutionPopulation(candidates, islandPopulationSize, expertRankings)
-    );
-    const islandDurations = new Array(lab4IslandCount).fill(0);
-    const islandBests = new Array<EvolutionRankingScore | null>(lab4IslandCount).fill(null);
-    const distributedStart = Date.now();
-
-    for (let generation = 0; generation < generations; generation += 1) {
-      const nextPopulations: string[][][] = [];
-
-      for (let islandIndex = 0; islandIndex < lab4IslandCount; islandIndex += 1) {
-        const islandStart = Date.now();
-        const evaluated = await evaluatePopulation(islandPopulations[islandIndex]);
-        const sorted = [...evaluated].sort(compareEvolutionScores);
-        const islandBest = sorted[0];
-
-        if (!islandBests[islandIndex] || compareEvolutionScores(islandBest, islandBests[islandIndex]!) < 0) {
-          islandBests[islandIndex] = islandBest;
-        }
-
-        nextPopulations.push(
-          evolvePopulationOnce(
-            evaluated,
-            islandPopulationSize,
-            tournamentSize,
-            mutationRate,
-            Math.min(eliteCount, islandPopulationSize)
-          )
-        );
-        islandDurations[islandIndex] += Date.now() - islandStart;
-      }
-
-      islandPopulations = nextPopulations;
-
-      if ((generation + 1) % migrationInterval === 0 && lab4IslandCount > 1) {
-        const migrants = islandBests.map((best, islandIndex) => ({
-          islandIndex,
-          migrants:
-            best === null
-              ? []
-              : Array.from({ length: migrantsPerIsland }, () => mutateChromosome(best.ranking))
-        }));
-
-        islandPopulations = islandPopulations.map((population, islandIndex) => {
-          const source = migrants[(islandIndex - 1 + migrants.length) % migrants.length];
-          if (source.migrants.length === 0) {
-            return population;
-          }
-
-          const preserved = population.slice(0, Math.max(population.length - migrantsPerIsland, 0));
-          return [...preserved, ...source.migrants.map((ranking) => [...ranking])];
-        });
-      }
-
-      await yieldToBrowser();
-    }
-
-    const distributedDurationMs = Date.now() - distributedStart;
-    const islandSummaries: LargeScaleIslandSummary[] = islandBests.map((best, index) => ({
-      islandId: index + 1,
-      populationSize: islandPopulationSize,
-      durationMs: islandDurations[index],
-      bestRanking: best?.ranking ?? [],
-      bestSumDistance: best?.sumDistance ?? Number.POSITIVE_INFINITY,
-      bestMaxDistance: best?.maxDistance ?? Number.POSITIVE_INFINITY
-    }));
-
-    const distributedBest = islandSummaries
-      .map((island) => ({
-        ranking: island.bestRanking,
-        sumDistance: island.bestSumDistance,
-        maxDistance: island.bestMaxDistance
-      }))
-      .sort(compareEvolutionScores)[0];
-
-    const estimatedParallelDurationMs = Math.max(...islandDurations);
-    const distributedResult: LargeScaleDistributedSummary = {
-      mode: 'island',
-      objective: 'min-sum',
-      populationSize: islandPopulationSize * lab4IslandCount,
-      generations,
-      bestRanking: distributedBest?.ranking ?? [],
-      bestSumDistance: distributedBest?.sumDistance ?? Number.POSITIVE_INFINITY,
-      bestMaxDistance: distributedBest?.maxDistance ?? Number.POSITIVE_INFINITY,
-      durationMs: distributedDurationMs,
-      islandCount: lab4IslandCount,
-      islands: islandSummaries,
-      estimatedParallelDurationMs,
-      migrationInterval,
-      migrantsPerIsland
-    };
-
-    const estimatedSpeedup =
-      estimatedParallelDurationMs > 0
-        ? Number((simpleDurationMs / estimatedParallelDurationMs).toFixed(2))
-        : 0;
-    const qualityDelta = distributedResult.bestSumDistance - simpleResult.bestSumDistance;
-
-    setLab4LargeScaleResult({
-      alternativeCount: candidates.length,
-      expertCount: lab4LargeExpertCount,
-      candidates,
-      expertRankings,
-      simple: simpleResult,
-      distributed: distributedResult,
-      estimatedSpeedup,
-      qualityDelta
-    });
-    setIsLab4LargeScaleRunning(false);
-  };
-
   if (!isLoggedIn) {
     return (
       <div className={baseStyles.page}>
@@ -1775,24 +1359,13 @@ export default function Admin() {
           />
         ) : activeLab === 'lab4' ? (
           <Lab4Section
-            lab4View={lab4View}
-            onLab4ViewChange={setLab4View}
             lab3Candidates={lab3Candidates}
-            factorial={factorial}
-            isLab4SubsetVisible={isLab4SubsetVisible}
-            onToggleLab4SubsetVisible={() => setIsLab4SubsetVisible((current) => !current)}
+            lab3ExpertRankings={lab3ExpertRankings}
             lab3ExhaustiveSearch={lab3ExhaustiveSearch}
-            runLab4DistributedSearch={runLab4DistributedSearch}
-            isLab4DistributedRunning={isLab4DistributedRunning}
-            activeLab4DistributedSearch={activeLab4DistributedSearch}
-            lab4LargeExpertCount={lab4LargeExpertCount}
-            onLab4LargeExpertCountChange={setLab4LargeExpertCount}
-            lab4IslandCount={lab4IslandCount}
-            onLab4IslandCountChange={setLab4IslandCount}
-            runLab4LargeScaleExperiment={runLab4LargeScaleExperiment}
-            isLab4LargeScaleRunning={isLab4LargeScaleRunning}
-            lab4LargeScaleResult={lab4LargeScaleResult}
-            formatDuration={formatDuration}
+            lab3ExpertCount={lab3ExpertCount}
+            onLab3ExpertCountChange={handleLab3ExpertCountChange}
+            onRegenerateLab3ExpertRankings={regenerateLab3ExpertRankings}
+            formatRankingOrderNumbers={formatRankingOrderNumbers}
           />
         ) : null}
       </div>
