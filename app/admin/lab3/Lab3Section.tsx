@@ -119,6 +119,55 @@ export function Lab3Section({
           100
       )
     : 0;
+  const formatSumFormula = (distances: number[]) =>
+    distances.length > 0 ? `${distances.join(' + ')} = ${distances.reduce((total, value) => total + value, 0)}` : '-';
+  const formatMaxFormula = (distances: number[]) =>
+    distances.length > 0 ? `max(${distances.join(', ')}) = ${Math.max(...distances)}` : '-';
+  const renderRankingTable = (
+    title: string,
+    rows: { ranking: string[]; sumDistance: number; maxDistance: number; distances?: number[] }[],
+    objective: 'min-sum' | 'min-max',
+    showCalculation = true
+  ) => (
+    <div className={styles.subSection}>
+      <h3 className={styles.subTitle}>{title}</h3>
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>№</th>
+              <th>Ранжування</th>
+              <th>Сума</th>
+              <th>Max</th>
+              {showCalculation ? <th>Обчислення</th> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => {
+              const valueFormula =
+                row.distances && row.distances.length > 0
+                  ? objective === 'min-sum'
+                    ? `Σd = ${formatSumFormula(row.distances)}`
+                    : formatMaxFormula(row.distances)
+                  : objective === 'min-sum'
+                    ? `Σd = ${row.sumDistance}`
+                    : `max = ${row.maxDistance}`;
+
+              return (
+                <tr key={`${objective}-${row.ranking.join('|')}-${index}`}>
+                  <td>{index + 1}</td>
+                  <td className={styles.sequenceCell}>{row.ranking.join(' > ')}</td>
+                  <td>{row.sumDistance}</td>
+                  <td>{row.maxDistance}</td>
+                  {showCalculation ? <td className={styles.formulaCell}>{valueFormula}</td> : null}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 
   return (
     <>
@@ -395,15 +444,11 @@ export function Lab3Section({
                   .join(', ')}
               </p>
             </div>
-            <div className={styles.subSection}>
-              <h3 className={styles.subTitle}>Топ-10 за сумою відстаней</h3>
-              {lab3ExhaustiveSearch.minSumTop.map((row, index) => (
-                <p key={`min-sum-${row.ranking.join('|')}`} className={styles.sectionText}>
-                  {index + 1}. {row.ranking.join(' > ')} (сума = {row.sumDistance}, max ={' '}
-                  {row.maxDistance})
-                </p>
-              ))}
-            </div>
+            {renderRankingTable(
+              'Топ-10 за сумою відстаней',
+              lab3ExhaustiveSearch.minSumTop,
+              'min-sum'
+            )}
             <div className={styles.subSection}>
               <h3 className={styles.subTitle}>Перший результат</h3>
               <div className={styles.highlightResultCard}>
@@ -420,6 +465,9 @@ export function Lab3Section({
                 <p className={styles.sectionText}>
                   сума = {lab3ExhaustiveSearch.minSumTop[0].sumDistance}, max ={' '}
                   {lab3ExhaustiveSearch.minSumTop[0].maxDistance}
+                </p>
+                <p className={styles.sectionText}>
+                  Σd = {formatSumFormula(lab3ExhaustiveSearch.minSumTop[0].distances)}
                 </p>
               </div>
             </div>
@@ -474,15 +522,11 @@ export function Lab3Section({
                   .join(', ')}
               </p>
             </div>
-            <div className={styles.subSection}>
-              <h3 className={styles.subTitle}>Топ-10 за критерієм MinMax</h3>
-              {lab3ExhaustiveSearch.minMaxTop.map((row, index) => (
-                <p key={`min-max-${row.ranking.join('|')}`} className={styles.sectionText}>
-                  {index + 1}. {row.ranking.join(' > ')} (max = {row.maxDistance}, сума ={' '}
-                  {row.sumDistance})
-                </p>
-              ))}
-            </div>
+            {renderRankingTable(
+              'Топ-10 за критерієм MinMax',
+              lab3ExhaustiveSearch.minMaxTop,
+              'min-max'
+            )}
             <div className={styles.subSection}>
               <h3 className={styles.subTitle}>Перший результат</h3>
               <div className={styles.highlightResultCard}>
@@ -499,6 +543,9 @@ export function Lab3Section({
                 <p className={styles.sectionText}>
                   max = {lab3ExhaustiveSearch.minMaxTop[0].maxDistance}, сума ={' '}
                   {lab3ExhaustiveSearch.minMaxTop[0].sumDistance}
+                </p>
+                <p className={styles.sectionText}>
+                  {formatMaxFormula(lab3ExhaustiveSearch.minMaxTop[0].distances)}
                 </p>
               </div>
             </div>
@@ -568,22 +615,14 @@ export function Lab3Section({
           </div>
         )}
         {lab3EvolutionResult && lab3EvolutionResult.topRankings.length > 0 && (
-          <div className={styles.subSection}>
-            <h3 className={styles.subTitle}>
-              {lab3EvolutionResult.objective === 'min-sum'
-                ? 'Рішення з мінімальною сумою відстаней'
-                : 'Рішення з мінімальним значенням Max'}
-            </h3>
-            {lab3EvolutionResult.topRankings.map((row, index) => (
-              <p
-                key={`lab3-evolution-${row.ranking.join('|')}-${index}`}
-                className={styles.sectionText}
-              >
-                {index + 1}. {row.ranking.join(' > ')} (сума = {row.sumDistance}, max ={' '}
-                {row.maxDistance})
-              </p>
-            ))}
-          </div>
+          renderRankingTable(
+            lab3EvolutionResult.objective === 'min-sum'
+              ? 'Рішення з мінімальною сумою відстаней'
+              : 'Рішення з мінімальним значенням Max',
+            lab3EvolutionResult.topRankings,
+            lab3EvolutionResult.objective,
+            false
+          )
         )}
       </section>
     </>
