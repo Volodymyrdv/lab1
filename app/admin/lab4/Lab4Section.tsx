@@ -42,6 +42,25 @@ type DistributedSearchProgress = {
   durationMs: number;
 };
 
+type WorkerProgressMessage = {
+  type: 'progress';
+  workerId: number;
+  processedPermutations: number;
+};
+
+type WorkerDoneMessage = {
+  type: 'done';
+  result: DistributedWorkerResult;
+};
+
+type WorkerErrorMessage = {
+  type: 'error';
+  workerId: number;
+  error: string;
+};
+
+type WorkerMessage = WorkerProgressMessage | WorkerDoneMessage | WorkerErrorMessage;
+
 type Lab4SectionProps = {
   lab3Candidates: string[];
   lab3ExpertRankings: ExpertRankingRow[];
@@ -74,13 +93,8 @@ const factorial = (value: number) => {
   return result;
 };
 
-const delayToMainThread = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-
 const compareRankingsAlphabetically = (left: string[], right: string[]) =>
   left.join('|').localeCompare(right.join('|'));
-
-const calculateHammingDistanceFull = (ranking: string[], expertRanking: string[]) =>
-  ranking.reduce((total, movie, index) => total + (expertRanking[index] === movie ? 0 : 1), 0);
 
 const compareMinSumResults = (left: ExhaustiveRankingResult, right: ExhaustiveRankingResult) =>
   left.sumDistance - right.sumDistance ||
@@ -103,168 +117,6 @@ const appendUniqueSolution = (
   return [...collection, candidate];
 };
 
-const computeDistributedPermutationSearchAsync = async (
-  candidates: string[],
-  expertRankings: ExpertRankingRow[],
-  onProgress: (progress: DistributedSearchProgress) => void,
-  shouldStop: () => boolean
-): Promise<DistributedSearchResult | null> => {
-  if (candidates.length === 0 || expertRankings.length === 0) {
-    return null;
-  }
-
-  const totalPermutations = factorial(candidates.length);
-  const startedAt = performance.now();
-  const totalWorkers = candidates.length;
-  const progressChunkSize = 500;
-  let processedPermutations = 0;
-  let completedWorkers = 0;
-  let operationsSinceYield = 0;
-  let globalMinSumBest: ExhaustiveRankingResult | null = null;
-  let globalMinMaxBest: ExhaustiveRankingResult | null = null;
-  let globalMinSumSolutions: ExhaustiveRankingResult[] = [];
-  let globalMinMaxSolutions: ExhaustiveRankingResult[] = [];
-  const workers: DistributedWorkerResult[] = [];
-
-  const publishProgress = async () => {
-    onProgress({
-      processedPermutations,
-      totalPermutations,
-      completedWorkers,
-      totalWorkers,
-      durationMs: Math.round(performance.now() - startedAt)
-    });
-    operationsSinceYield = 0;
-    await delayToMainThread();
-  };
-
-  const evaluateCandidate = (ranking: string[]) => {
-    const distances = expertRankings.map((expertRow) =>
-      calculateHammingDistanceFull(ranking, expertRow.ranking)
-    );
-
-    return {
-      ranking,
-      distances,
-      sumDistance: distances.reduce((total, value) => total + value, 0),
-      maxDistance: Math.max(...distances)
-    };
-  };
-
-  for (let workerIndex = 0; workerIndex < candidates.length; workerIndex += 1) {
-    if (shouldStop()) {
-      return null;
-    }
-
-    const prefix = [candidates[workerIndex]];
-    const currentRanking = [...prefix];
-    const used = Array.from({ length: candidates.length }, (_, index) => index === workerIndex);
-    let workerMinSumBest: ExhaustiveRankingResult | null = null;
-    let workerMinMaxBest: ExhaustiveRankingResult | null = null;
-    let workerProcessed = 0;
-
-    const traverse = async (depth: number): Promise<void> => {
-      if (shouldStop()) {
-        return;
-      }
-
-      if (depth === candidates.length) {
-        const candidate = evaluateCandidate([...currentRanking]);
-
-        if (!workerMinSumBest || compareMinSumResults(candidate, workerMinSumBest) < 0) {
-          workerMinSumBest = candidate;
-        }
-
-        if (!workerMinMaxBest || compareMinMaxResults(candidate, workerMinMaxBest) < 0) {
-          workerMinMaxBest = candidate;
-        }
-
-        if (!globalMinSumBest || compareMinSumResults(candidate, globalMinSumBest) < 0) {
-          globalMinSumBest = candidate;
-          globalMinSumSolutions = [candidate];
-        } else if (
-          globalMinSumBest &&
-          candidate.sumDistance === globalMinSumBest.sumDistance &&
-          candidate.maxDistance === globalMinSumBest.maxDistance
-        ) {
-          globalMinSumSolutions = appendUniqueSolution(globalMinSumSolutions, candidate);
-        }
-
-        if (!globalMinMaxBest || compareMinMaxResults(candidate, globalMinMaxBest) < 0) {
-          globalMinMaxBest = candidate;
-          globalMinMaxSolutions = [candidate];
-        } else if (
-          globalMinMaxBest &&
-          candidate.maxDistance === globalMinMaxBest.maxDistance &&
-          candidate.sumDistance === globalMinMaxBest.sumDistance
-        ) {
-          globalMinMaxSolutions = appendUniqueSolution(globalMinMaxSolutions, candidate);
-        }
-
-        processedPermutations += 1;
-        workerProcessed += 1;
-        operationsSinceYield += 1;
-
-        if (
-          processedPermutations === totalPermutations ||
-          operationsSinceYield >= progressChunkSize
-        ) {
-          await publishProgress();
-        }
-
-        return;
-      }
-
-      for (let index = 0; index < candidates.length; index += 1) {
-        if (used[index]) {
-          continue;
-        }
-
-        used[index] = true;
-        currentRanking.push(candidates[index]);
-        await traverse(depth + 1);
-        currentRanking.pop();
-        used[index] = false;
-
-        if (shouldStop()) {
-          return;
-        }
-      }
-    };
-
-    await traverse(prefix.length);
-
-    if (shouldStop()) {
-      return null;
-    }
-
-    completedWorkers += 1;
-    workers.push({
-      workerId: workerIndex + 1,
-      prefix,
-      permutationsProcessed: workerProcessed,
-      minSumBest: workerMinSumBest,
-      minMaxBest: workerMinMaxBest
-    });
-
-    await publishProgress();
-  }
-
-  if (shouldStop() || !globalMinSumBest || !globalMinMaxBest) {
-    return null;
-  }
-
-  return {
-    totalPermutations,
-    durationMs: Math.round(performance.now() - startedAt),
-    workers,
-    minSumBest: globalMinSumBest,
-    minSumSolutions: [...globalMinSumSolutions].sort(compareMinSumResults),
-    minMaxBest: globalMinMaxBest,
-    minMaxSolutions: [...globalMinMaxSolutions].sort(compareMinMaxResults)
-  };
-};
-
 export function Lab4Section({
   lab3Candidates,
   lab3ExpertRankings,
@@ -279,6 +131,7 @@ export function Lab4Section({
     null
   );
   const [isDistributedSearchRunning, setIsDistributedSearchRunning] = useState(false);
+  const [distributedSearchError, setDistributedSearchError] = useState<string | null>(null);
   const lab4InputPayload = useMemo(
     () =>
       JSON.stringify({
@@ -291,22 +144,28 @@ export function Lab4Section({
   const activeSearchSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
-    let isCancelled = false;
     const currentInputSignature = lab4InputPayload;
+    const parsedInput = JSON.parse(currentInputSignature) as {
+      candidates: string[];
+      expertRankings: ExpertRankingRow[];
+    };
+    const currentCandidates = parsedInput.candidates;
+    const currentExpertRankings = parsedInput.expertRankings;
+    const totalPermutations = factorial(currentCandidates.length);
+    const workers: Worker[] = [];
+    let isCancelled = false;
 
-    const runDistributedSearch = async () => {
-      const parsedInput = JSON.parse(currentInputSignature) as {
-        candidates: string[];
-        expertRankings: ExpertRankingRow[];
-      };
-      const currentCandidates = parsedInput.candidates;
-      const currentExpertRankings = parsedInput.expertRankings;
+    const stopWorkers = () => {
+      workers.forEach((worker) => worker.terminate());
+    };
 
+    const runDistributedSearch = () => {
       if (currentCandidates.length === 0 || currentExpertRankings.length === 0) {
         completedSearchSignatureRef.current = null;
         activeSearchSignatureRef.current = null;
         setDistributedSearch(null);
         setDistributedProgress(null);
+        setDistributedSearchError(null);
         setIsDistributedSearchRunning(false);
         return;
       }
@@ -320,53 +179,206 @@ export function Lab4Section({
         return;
       }
 
+      if (typeof Worker === 'undefined') {
+        setDistributedSearchError('Поточний браузер не підтримує Web Workers.');
+        setDistributedSearch(null);
+        setDistributedProgress(null);
+        setIsDistributedSearchRunning(false);
+        return;
+      }
+
       activeSearchSignatureRef.current = currentInputSignature;
       setDistributedSearch(null);
+      setDistributedSearchError(null);
       setDistributedProgress({
         processedPermutations: 0,
-        totalPermutations: factorial(currentCandidates.length),
+        totalPermutations,
         completedWorkers: 0,
         totalWorkers: currentCandidates.length,
         durationMs: 0
       });
       setIsDistributedSearchRunning(true);
 
-      const result = await computeDistributedPermutationSearchAsync(
-        currentCandidates,
-        currentExpertRankings,
-        (progress) => {
-          if (!isCancelled) {
-            setDistributedProgress(progress);
-          }
-        },
-        () => isCancelled
-      );
+      const startedAt = performance.now();
+      const progressByWorker = new Map<number, number>();
+      const resultsByWorker = new Map<number, DistributedWorkerResult>();
+      let completedWorkers = 0;
+      let failed = false;
 
-      if (isCancelled) {
-        return;
-      }
+      const publishProgress = () => {
+        if (isCancelled) {
+          return;
+        }
 
-      activeSearchSignatureRef.current = null;
-      completedSearchSignatureRef.current = result ? currentInputSignature : null;
-      setDistributedSearch(result);
-      setDistributedProgress(
-        result
-          ? {
-              processedPermutations: result.totalPermutations,
-              totalPermutations: result.totalPermutations,
-              completedWorkers: result.workers.length,
-              totalWorkers: result.workers.length,
-              durationMs: result.durationMs
+        const processedPermutations = Array.from(progressByWorker.values()).reduce(
+          (total, value) => total + value,
+          0
+        );
+
+        setDistributedProgress({
+          processedPermutations,
+          totalPermutations,
+          completedWorkers,
+          totalWorkers: currentCandidates.length,
+          durationMs: Math.round(performance.now() - startedAt)
+        });
+      };
+
+      const finishIfReady = () => {
+        if (failed || completedWorkers !== currentCandidates.length || isCancelled) {
+          return;
+        }
+
+        const workerResults = currentCandidates
+          .map((_, index) => resultsByWorker.get(index + 1) ?? null)
+          .filter((result): result is DistributedWorkerResult => Boolean(result));
+        let globalMinSumBest: ExhaustiveRankingResult | null = null;
+        let globalMinMaxBest: ExhaustiveRankingResult | null = null;
+        let globalMinSumSolutions: ExhaustiveRankingResult[] = [];
+        let globalMinMaxSolutions: ExhaustiveRankingResult[] = [];
+
+        workerResults.forEach((workerResult) => {
+          if (workerResult.minSumBest) {
+            if (
+              !globalMinSumBest ||
+              compareMinSumResults(workerResult.minSumBest, globalMinSumBest) < 0
+            ) {
+              globalMinSumBest = workerResult.minSumBest;
+              globalMinSumSolutions = [workerResult.minSumBest];
+            } else if (
+              globalMinSumBest &&
+              workerResult.minSumBest.sumDistance === globalMinSumBest.sumDistance &&
+              workerResult.minSumBest.maxDistance === globalMinSumBest.maxDistance
+            ) {
+              globalMinSumSolutions = appendUniqueSolution(
+                globalMinSumSolutions,
+                workerResult.minSumBest
+              );
             }
-          : null
-      );
-      setIsDistributedSearchRunning(false);
+          }
+
+          if (workerResult.minMaxBest) {
+            if (
+              !globalMinMaxBest ||
+              compareMinMaxResults(workerResult.minMaxBest, globalMinMaxBest) < 0
+            ) {
+              globalMinMaxBest = workerResult.minMaxBest;
+              globalMinMaxSolutions = [workerResult.minMaxBest];
+            } else if (
+              globalMinMaxBest &&
+              workerResult.minMaxBest.maxDistance === globalMinMaxBest.maxDistance &&
+              workerResult.minMaxBest.sumDistance === globalMinMaxBest.sumDistance
+            ) {
+              globalMinMaxSolutions = appendUniqueSolution(
+                globalMinMaxSolutions,
+                workerResult.minMaxBest
+              );
+            }
+          }
+        });
+
+        if (!globalMinSumBest || !globalMinMaxBest) {
+          failed = true;
+          activeSearchSignatureRef.current = null;
+          setDistributedSearchError('Не вдалося зібрати глобальний результат розподіленого перебору.');
+          setDistributedSearch(null);
+          setIsDistributedSearchRunning(false);
+          stopWorkers();
+          return;
+        }
+
+        activeSearchSignatureRef.current = null;
+        completedSearchSignatureRef.current = currentInputSignature;
+        setDistributedSearch({
+          totalPermutations,
+          durationMs: Math.round(performance.now() - startedAt),
+          workers: workerResults,
+          minSumBest: globalMinSumBest,
+          minSumSolutions: [...globalMinSumSolutions].sort(compareMinSumResults),
+          minMaxBest: globalMinMaxBest,
+          minMaxSolutions: [...globalMinMaxSolutions].sort(compareMinMaxResults)
+        });
+        setDistributedProgress({
+          processedPermutations: totalPermutations,
+          totalPermutations,
+          completedWorkers: workerResults.length,
+          totalWorkers: currentCandidates.length,
+          durationMs: Math.round(performance.now() - startedAt)
+        });
+        setIsDistributedSearchRunning(false);
+        stopWorkers();
+      };
+
+      currentCandidates.forEach((candidate, index) => {
+        const workerId = index + 1;
+        progressByWorker.set(workerId, 0);
+        const worker = new Worker(
+          new URL('./distributedPermutation.worker.ts', import.meta.url),
+          { type: 'module' }
+        );
+
+        worker.onmessage = (event: MessageEvent<WorkerMessage>) => {
+          if (isCancelled || failed) {
+            return;
+          }
+
+          const message = event.data;
+
+          if (message.type === 'progress') {
+            progressByWorker.set(message.workerId, message.processedPermutations);
+            publishProgress();
+            return;
+          }
+
+          if (message.type === 'done') {
+            resultsByWorker.set(message.result.workerId, message.result);
+            progressByWorker.set(
+              message.result.workerId,
+              message.result.permutationsProcessed
+            );
+            completedWorkers += 1;
+            publishProgress();
+            finishIfReady();
+            return;
+          }
+
+          failed = true;
+          activeSearchSignatureRef.current = null;
+          setDistributedSearchError(message.error);
+          setDistributedSearch(null);
+          setIsDistributedSearchRunning(false);
+          stopWorkers();
+        };
+
+        worker.onerror = () => {
+          if (failed || isCancelled) {
+            return;
+          }
+
+          failed = true;
+          activeSearchSignatureRef.current = null;
+          setDistributedSearchError(`Помилка у Web Worker ${workerId}.`);
+          setDistributedSearch(null);
+          setIsDistributedSearchRunning(false);
+          stopWorkers();
+        };
+
+        workers.push(worker);
+        worker.postMessage({
+          workerId,
+          prefix: [candidate],
+          candidates: currentCandidates,
+          expertRankings: currentExpertRankings,
+          progressChunkSize: 500
+        });
+      });
     };
 
     runDistributedSearch();
 
     return () => {
       isCancelled = true;
+      stopWorkers();
       if (activeSearchSignatureRef.current === currentInputSignature) {
         activeSearchSignatureRef.current = null;
       }
@@ -509,34 +521,32 @@ export function Lab4Section({
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>Схема декомпозиції прямого перебору</h2>
         <p className={styles.sectionText}>
-          Простір усіх перестановок розбиваємо на незалежні підмножини за першим елементом
-          ранжування. Кожний підпроцес отримує фіксований перший об&apos;єкт і перебирає всі
-          перестановки решти {Math.max(lab3Candidates.length - 1, 0)} об&apos;єктів.
+          Простір усіх перестановок розбиваємо на неперетинні підмножини за першим елементом
+          ранжування. Для кожного можливого першого елемента запускається окремий Web Worker, який
+          перебирає всі перестановки решти {Math.max(lab3Candidates.length - 1, 0)} об&apos;єктів.
         </p>
         <div className={styles.infoGrid}>
           <article className={styles.infoCard}>
-            <span className={styles.infoLabel}>Кількість підзадач</span>
+            <span className={styles.infoLabel}>Кількість worker-підзадач</span>
             <span className={styles.infoValue}>{lab3Candidates.length}</span>
             <span className={styles.infoMeta}>
-              По одній підзадачі на кожен можливий перший елемент перестановки.
+              Один реальний Web Worker на кожен можливий перший елемент перестановки.
             </span>
           </article>
           <article className={styles.infoCard}>
             <span className={styles.infoLabel}>Розмір підзадачі</span>
             <span className={styles.infoValue}>{expectedWorkerPermutations}</span>
             <span className={styles.infoMeta}>
-              Кожна підзадача містить усі перестановки хвоста довжини n-1, тобто (n-1)!.
+              Кожна worker-підзадача містить рівно (n-1)! перестановок.
             </span>
           </article>
           <article className={styles.infoCard}>
             <span className={styles.infoLabel}>Доведення покриття</span>
             <span className={styles.infoValue}>
-              {lab3Candidates.length} * {expectedWorkerPermutations} ={' '}
-              {factorial(lab3Candidates.length)}
+              {lab3Candidates.length} * {expectedWorkerPermutations} = {factorial(lab3Candidates.length)}
             </span>
             <span className={styles.infoMeta}>
-              Кожна перестановка має рівно один перший елемент, тому належить рівно одній
-              підмножині.
+              Кожна перестановка має єдиний перший елемент, тому буде оброблена рівно одним worker.
             </span>
           </article>
         </div>
@@ -554,11 +564,14 @@ export function Lab4Section({
               {distributedProgress.totalPermutations} ({distributedProgressPercent}%)
             </p>
             <p className={styles.sectionText}>
-              Завершено підзадач: {distributedProgress.completedWorkers} /{' '}
+              Завершено worker-підзадач: {distributedProgress.completedWorkers} /{' '}
               {distributedProgress.totalWorkers}
             </p>
             <p className={styles.sectionText}>Поточний час: {distributedProgress.durationMs} мс</p>
           </div>
+        )}
+        {distributedSearchError && (
+          <p className={`${styles.sectionText} ${styles.muted}`}>{distributedSearchError}</p>
         )}
         {distributedSearch ? (
           <>
@@ -567,14 +580,14 @@ export function Lab4Section({
                 <span className={styles.infoLabel}>Перебрано</span>
                 <span className={styles.infoValue}>{distributedSearch.totalPermutations}</span>
                 <span className={styles.infoMeta}>
-                  Після розбиття на {distributedSearch.workers.length} незалежних підзадач.
+                  Результат зібраний з {distributedSearch.workers.length} реальних Web Workers.
                 </span>
               </article>
               <article className={styles.infoCard}>
                 <span className={styles.infoLabel}>Час ЛР4</span>
                 <span className={styles.infoValue}>{distributedSearch.durationMs} мс</span>
                 <span className={styles.infoMeta}>
-                  Розподілений перебір виконується поверх тих самих даних, що й ЛР3.
+                  Головний потік тільки координує роботу, а сам перебір виконують worker-и.
                 </span>
               </article>
               <article className={styles.infoCard}>
@@ -604,7 +617,7 @@ export function Lab4Section({
                   <tbody>
                     {distributedSearch.workers.map((worker) => (
                       <tr key={`worker-${worker.workerId}`}>
-                        <td>Процес {worker.workerId}</td>
+                        <td>Worker {worker.workerId}</td>
                         <td>{worker.prefix.join(' > ')}</td>
                         <td>{worker.permutationsProcessed}</td>
                         <td className={styles.sequenceCell}>
@@ -677,7 +690,7 @@ export function Lab4Section({
         ) : (
           <p className={`${styles.sectionText} ${styles.muted}`}>
             {isDistributedSearchRunning
-              ? 'Розподілений перебір вже виконується. Результати з’являться після завершення.'
+              ? 'Реальний паралельний перебір у worker-ах вже виконується. Результати з’являться після завершення.'
               : 'Для запуску розподіленого перебору потрібні об’єкти та ранжування експертів.'}
           </p>
         )}
@@ -692,15 +705,14 @@ export function Lab4Section({
                 <span className={styles.infoLabel}>Час прямого перебору ЛР3</span>
                 <span className={styles.infoValue}>{lab3ExhaustiveSearch.durationMs} мс</span>
                 <span className={styles.infoMeta}>
-                  Повний перебір усіх перестановок без декомпозиції простору пошуку.
+                  Повний перебір усіх перестановок в одному потоці без worker-декомпозиції.
                 </span>
               </article>
               <article className={styles.infoCard}>
                 <span className={styles.infoLabel}>Час розподіленого перебору ЛР4</span>
                 <span className={styles.infoValue}>{distributedSearch.durationMs} мс</span>
                 <span className={styles.infoMeta}>
-                  Той самий повний перебір, але поділений на незалежні підзадачі за першим
-                  елементом.
+                  Паралельний перебір із реальними Web Workers для окремих підзадач.
                 </span>
               </article>
               <article className={styles.infoCard}>
@@ -716,9 +728,9 @@ export function Lab4Section({
                   {directVsDistributedTimeDelta === null
                     ? 'Порівняння часу недоступне.'
                     : directVsDistributedTimeDelta > 0
-                      ? 'Розподілений перебір спрацював швидше за прямий.'
+                      ? 'ЛР4 з worker-ами спрацювала швидше за прямий перебір ЛР3.'
                       : directVsDistributedTimeDelta < 0
-                        ? 'Прямий перебір спрацював швидше за розподілений.'
+                        ? 'ЛР3 спрацювала швидше; накладні витрати на worker-и переважають.'
                         : 'Обидва способи дали однаковий час виконання.'}
                 </span>
               </article>
