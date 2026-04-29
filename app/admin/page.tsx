@@ -1362,6 +1362,7 @@ export default function Admin() {
             lab3Candidates={lab3Candidates}
             lab3ExpertRankings={lab3ExpertRankings}
             lab3ExhaustiveSearch={lab3ExhaustiveSearch}
+            lab3EvolutionResult={lab3EvolutionResult}
             lab3ExpertCount={lab3ExpertCount}
             onLab3ExpertCountChange={handleLab3ExpertCountChange}
             onRegenerateLab3ExpertRankings={regenerateLab3ExpertRankings}

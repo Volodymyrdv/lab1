@@ -42,6 +42,29 @@ type DistributedSearchProgress = {
   durationMs: number;
 };
 
+type Lab3EvolutionResult = {
+  objective: 'min-sum' | 'min-max';
+  populationSize: number;
+  generations: number;
+  bestRanking: string[];
+  bestSumDistance: number;
+  bestMaxDistance: number;
+  topRankings: { ranking: string[]; sumDistance: number; maxDistance: number }[];
+  durationMs: number;
+};
+
+type EvolutionRankingScore = {
+  ranking: string[];
+  sumDistance: number;
+  maxDistance: number;
+};
+
+type Lab4EvolutionProgress = {
+  generation: number;
+  totalGenerations: number;
+  durationMs: number;
+};
+
 type WorkerProgressMessage = {
   type: 'progress';
   workerId: number;
@@ -77,6 +100,7 @@ type Lab4SectionProps = {
       maxDistance: number;
     };
   } | null;
+  lab3EvolutionResult: Lab3EvolutionResult | null;
   lab3ExpertCount: number;
   onLab3ExpertCountChange: (value: number) => void;
   onRegenerateLab3ExpertRankings: () => void;
@@ -117,10 +141,242 @@ const appendUniqueSolution = (
   return [...collection, candidate];
 };
 
+const randomPermutation = (items: string[]) => {
+  const result = [...items];
+
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+
+  return result;
+};
+
+const compareObjectiveScores = (
+  left: EvolutionRankingScore,
+  right: EvolutionRankingScore,
+  objective: 'min-sum' | 'min-max'
+) => {
+  if (objective === 'min-sum') {
+    return (
+      left.sumDistance - right.sumDistance ||
+      left.maxDistance - right.maxDistance ||
+      compareRankingsAlphabetically(left.ranking, right.ranking)
+    );
+  }
+
+  return (
+    left.maxDistance - right.maxDistance ||
+    left.sumDistance - right.sumDistance ||
+    compareRankingsAlphabetically(left.ranking, right.ranking)
+  );
+};
+
+const tournamentSelectEvolution = (
+  population: EvolutionRankingScore[],
+  tournamentSize: number,
+  objective: 'min-sum' | 'min-max'
+) => {
+  let best = population[Math.floor(Math.random() * population.length)];
+
+  for (let index = 1; index < tournamentSize; index += 1) {
+    const candidate = population[Math.floor(Math.random() * population.length)];
+    if (compareObjectiveScores(candidate, best, objective) < 0) {
+      best = candidate;
+    }
+  }
+
+  return best;
+};
+
+const mutateChromosome = (chromosome: string[]) => {
+  if (chromosome.length < 2) {
+    return chromosome;
+  }
+
+  const mutated = [...chromosome];
+  const leftIndex = Math.floor(Math.random() * mutated.length);
+  let rightIndex = Math.floor(Math.random() * mutated.length);
+
+  if (rightIndex === leftIndex) {
+    rightIndex = (rightIndex + 1) % mutated.length;
+  }
+
+  [mutated[leftIndex], mutated[rightIndex]] = [mutated[rightIndex], mutated[leftIndex]];
+  return mutated;
+};
+
+const crossoverChromosomes = (leftParent: string[], rightParent: string[]) => {
+  if (leftParent.length < 2) {
+    return [...leftParent];
+  }
+
+  const start = Math.floor(Math.random() * leftParent.length);
+  const end = start + Math.floor(Math.random() * (leftParent.length - start));
+  const child = new Array<string>(leftParent.length).fill('');
+  const used = new Set<string>();
+
+  for (let index = start; index <= end; index += 1) {
+    child[index] = leftParent[index];
+    used.add(leftParent[index]);
+  }
+
+  let rightIndex = 0;
+
+  for (let childIndex = 0; childIndex < child.length; childIndex += 1) {
+    if (child[childIndex]) {
+      continue;
+    }
+
+    while (used.has(rightParent[rightIndex])) {
+      rightIndex += 1;
+    }
+
+    child[childIndex] = rightParent[rightIndex];
+    used.add(rightParent[rightIndex]);
+    rightIndex += 1;
+  }
+
+  return child;
+};
+
+const createEvolutionPopulation = (
+  candidates: string[],
+  size: number,
+  expertRankings: ExpertRankingRow[]
+) => {
+  const population: string[][] = [];
+  const seen = new Set<string>();
+
+  expertRankings.forEach((row) => {
+    if (population.length >= size) {
+      return;
+    }
+
+    const signature = row.ranking.join('|');
+    if (!seen.has(signature)) {
+      population.push([...row.ranking]);
+      seen.add(signature);
+    }
+  });
+
+  while (population.length < size) {
+    const ranking = randomPermutation(candidates);
+    const signature = ranking.join('|');
+
+    if (!seen.has(signature)) {
+      population.push(ranking);
+      seen.add(signature);
+    }
+  }
+
+  return population;
+};
+
+const evolvePopulationOnce = (
+  evaluatedPopulation: EvolutionRankingScore[],
+  targetSize: number,
+  tournamentSize: number,
+  mutationRate: number,
+  eliteCount: number,
+  objective: 'min-sum' | 'min-max'
+) => {
+  const sorted = [...evaluatedPopulation].sort((left, right) =>
+    compareObjectiveScores(left, right, objective)
+  );
+  const nextPopulation = sorted
+    .slice(0, Math.min(eliteCount, sorted.length))
+    .map((item) => [...item.ranking]);
+
+  while (nextPopulation.length < targetSize) {
+    const leftParent = tournamentSelectEvolution(sorted, tournamentSize, objective);
+    const rightParent = tournamentSelectEvolution(sorted, tournamentSize, objective);
+    let child = crossoverChromosomes(leftParent.ranking, rightParent.ranking);
+
+    if (Math.random() < mutationRate) {
+      child = mutateChromosome(child);
+    }
+
+    if (Math.random() < mutationRate / 2) {
+      child = mutateChromosome(child);
+    }
+
+    nextPopulation.push(child);
+  }
+
+  return nextPopulation;
+};
+
+const filterRankingsByBestObjective = (
+  rankings: { ranking: string[]; sumDistance: number; maxDistance: number }[],
+  objective: 'min-sum' | 'min-max'
+) => {
+  if (rankings.length === 0) {
+    return rankings;
+  }
+
+  const bestValue =
+    objective === 'min-sum'
+      ? Math.min(...rankings.map((item) => item.sumDistance))
+      : Math.min(...rankings.map((item) => item.maxDistance));
+
+  return rankings.filter((item) =>
+    objective === 'min-sum' ? item.sumDistance === bestValue : item.maxDistance === bestValue
+  );
+};
+
+const evaluatePopulationWithWorkers = async (
+  population: string[][],
+  expertRankings: ExpertRankingRow[],
+  threadCount: number
+) => {
+  const activeThreadCount = Math.max(1, Math.min(threadCount, population.length));
+  const chunkSize = Math.ceil(population.length / activeThreadCount);
+
+  const chunks = Array.from({ length: activeThreadCount }, (_, index) =>
+    population.slice(index * chunkSize, (index + 1) * chunkSize)
+  ).filter((chunk) => chunk.length > 0);
+
+  const workerPromises = chunks.map(
+    (chunk, index) =>
+      new Promise<EvolutionRankingScore[]>((resolve, reject) => {
+        const worker = new Worker(new URL('./geneticEvaluation.worker.ts', import.meta.url), {
+          type: 'module'
+        });
+
+        worker.onmessage = (event: MessageEvent<{ type: 'done' | 'error'; scores?: EvolutionRankingScore[]; error?: string }>) => {
+          const message = event.data;
+          worker.terminate();
+
+          if (message.type === 'done' && message.scores) {
+            resolve(message.scores);
+            return;
+          }
+
+          reject(new Error(message.error ?? `Помилка у worker оцінювання ${index + 1}.`));
+        };
+
+        worker.onerror = () => {
+          worker.terminate();
+          reject(new Error(`Помилка у worker оцінювання ${index + 1}.`));
+        };
+
+        worker.postMessage({
+          population: chunk,
+          expertRankings
+        });
+      })
+  );
+
+  const evaluatedChunks = await Promise.all(workerPromises);
+  return evaluatedChunks.flat();
+};
+
 export function Lab4Section({
   lab3Candidates,
   lab3ExpertRankings,
   lab3ExhaustiveSearch,
+  lab3EvolutionResult,
   lab3ExpertCount,
   onLab3ExpertCountChange,
   onRegenerateLab3ExpertRankings,
@@ -132,6 +388,16 @@ export function Lab4Section({
   );
   const [isDistributedSearchRunning, setIsDistributedSearchRunning] = useState(false);
   const [distributedSearchError, setDistributedSearchError] = useState<string | null>(null);
+  const [lab4EvolutionObjective, setLab4EvolutionObjective] = useState<'min-sum' | 'min-max'>(
+    'min-sum'
+  );
+  const [lab4EvolutionThreadCount, setLab4EvolutionThreadCount] = useState<2 | 3 | 4>(2);
+  const [lab4EvolutionResult, setLab4EvolutionResult] = useState<Lab3EvolutionResult | null>(null);
+  const [lab4EvolutionProgress, setLab4EvolutionProgress] = useState<Lab4EvolutionProgress | null>(
+    null
+  );
+  const [isLab4EvolutionRunning, setIsLab4EvolutionRunning] = useState(false);
+  const [lab4EvolutionError, setLab4EvolutionError] = useState<string | null>(null);
   const lab4InputPayload = useMemo(
     () =>
       JSON.stringify({
@@ -416,6 +682,138 @@ export function Lab4Section({
     distributedSearch && lab3ExhaustiveSearch
       ? distributedSearch.durationMs - lab3ExhaustiveSearch.durationMs
       : null;
+  const geneticComparisonReady =
+    Boolean(lab3EvolutionResult && lab4EvolutionResult) &&
+    lab3EvolutionResult!.objective === lab4EvolutionResult!.objective;
+  const geneticObjectiveImprovement =
+    geneticComparisonReady && lab3EvolutionResult && lab4EvolutionResult
+      ? lab4EvolutionResult.objective === 'min-sum'
+        ? lab3EvolutionResult.bestSumDistance - lab4EvolutionResult.bestSumDistance
+        : lab3EvolutionResult.bestMaxDistance - lab4EvolutionResult.bestMaxDistance
+      : null;
+  const geneticTimeImprovement =
+    geneticComparisonReady && lab3EvolutionResult && lab4EvolutionResult
+      ? lab3EvolutionResult.durationMs - lab4EvolutionResult.durationMs
+      : null;
+
+  const runLab4EvolutionSearch = async () => {
+    if (lab3Candidates.length === 0 || lab3ExpertRankings.length === 0) {
+      setLab4EvolutionResult(null);
+      return;
+    }
+
+    if (typeof Worker === 'undefined') {
+      setLab4EvolutionError('Поточний браузер не підтримує Web Workers для генетичного алгоритму.');
+      setLab4EvolutionResult(null);
+      return;
+    }
+
+    setIsLab4EvolutionRunning(true);
+    setLab4EvolutionError(null);
+    setLab4EvolutionResult(null);
+    setLab4EvolutionProgress({
+      generation: 0,
+      totalGenerations: 40,
+      durationMs: 0
+    });
+
+    const startedAt = performance.now();
+    const populationSize = Math.min(Math.max(lab3Candidates.length * 12, 48), 160);
+    const generations = 40;
+    const tournamentSize = 4;
+    const mutationRate = 0.35;
+    const eliteCount = 4;
+
+    try {
+      let population = createEvolutionPopulation(
+        lab3Candidates,
+        populationSize,
+        lab3ExpertRankings
+      );
+      let evaluated = await evaluatePopulationWithWorkers(
+        population,
+        lab3ExpertRankings,
+        lab4EvolutionThreadCount
+      );
+      let best = evaluated[0];
+      let globalTop: { ranking: string[]; sumDistance: number; maxDistance: number }[] = [];
+
+      for (let generation = 1; generation <= generations; generation += 1) {
+        for (let index = 1; index < evaluated.length; index += 1) {
+          if (
+            compareObjectiveScores(evaluated[index], best, lab4EvolutionObjective) < 0
+          ) {
+            best = evaluated[index];
+          }
+        }
+
+        const currentTop = [...evaluated]
+          .sort((left, right) => compareObjectiveScores(left, right, lab4EvolutionObjective))
+          .slice(0, 40)
+          .map((item) => ({
+            ranking: item.ranking,
+            sumDistance: item.sumDistance,
+            maxDistance: item.maxDistance
+          }));
+
+        globalTop = [...globalTop, ...currentTop]
+          .sort((left, right) => compareObjectiveScores(left, right, lab4EvolutionObjective))
+          .filter(
+            (item, index, collection) =>
+              collection.findIndex((row) => row.ranking.join('|') === item.ranking.join('|')) ===
+              index
+          )
+          .slice(0, 40);
+
+        const sortedEvaluated = [...evaluated].sort((left, right) =>
+          compareObjectiveScores(left, right, lab4EvolutionObjective)
+        );
+
+        population = evolvePopulationOnce(
+          sortedEvaluated,
+          populationSize,
+          tournamentSize,
+          mutationRate,
+          eliteCount,
+          lab4EvolutionObjective
+        );
+
+        evaluated = await evaluatePopulationWithWorkers(
+          population,
+          lab3ExpertRankings,
+          lab4EvolutionThreadCount
+        );
+
+        setLab4EvolutionProgress({
+          generation,
+          totalGenerations: generations,
+          durationMs: Math.round(performance.now() - startedAt)
+        });
+      }
+
+      setLab4EvolutionResult({
+        objective: lab4EvolutionObjective,
+        populationSize,
+        generations,
+        bestRanking: best.ranking,
+        bestSumDistance: best.sumDistance,
+        bestMaxDistance: best.maxDistance,
+        topRankings: filterRankingsByBestObjective(globalTop, lab4EvolutionObjective),
+        durationMs: Math.round(performance.now() - startedAt)
+      });
+      setLab4EvolutionProgress({
+        generation: generations,
+        totalGenerations: generations,
+        durationMs: Math.round(performance.now() - startedAt)
+      });
+    } catch (error) {
+      setLab4EvolutionError(
+        error instanceof Error ? error.message : 'Помилка під час розподіленого ГА.'
+      );
+    } finally {
+      setIsLab4EvolutionRunning(false);
+    }
+  };
 
   const renderSolutionTable = (
     title: string,
@@ -692,6 +1090,218 @@ export function Lab4Section({
             {isDistributedSearchRunning
               ? 'Реальний паралельний перебір у worker-ах вже виконується. Результати з’являться після завершення.'
               : 'Для запуску розподіленого перебору потрібні об’єкти та ранжування експертів.'}
+          </p>
+        )}
+      </section>
+
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>Розподілений генетичний алгоритм</h2>
+        <p className={styles.sectionText}>
+          У ЛР4 оцінювання популяції виконується паралельно через Web Workers. Кількість потоків
+          можна обрати вручну: 2, 3 або 4.
+        </p>
+        <div className={styles.controlRow}>
+          <div className={baseStyles.inputGroup}>
+            <label htmlFor='lab4-ga-objective' className={styles.controlLabel}>
+              Фітнес-функція
+            </label>
+            <select
+              id='lab4-ga-objective'
+              value={lab4EvolutionObjective}
+              onChange={(e) =>
+                setLab4EvolutionObjective(e.target.value as 'min-sum' | 'min-max')
+              }
+              className={styles.select}
+            >
+              <option value='min-sum'>Мінімальна сума відстаней</option>
+              <option value='min-max'>MinMax</option>
+            </select>
+          </div>
+          <div className={baseStyles.inputGroup}>
+            <label htmlFor='lab4-ga-threads' className={styles.controlLabel}>
+              Кількість потоків
+            </label>
+            <select
+              id='lab4-ga-threads'
+              value={lab4EvolutionThreadCount}
+              onChange={(e) =>
+                setLab4EvolutionThreadCount(
+                  Number.parseInt(e.target.value, 10) as 2 | 3 | 4
+                )
+              }
+              className={styles.select}
+            >
+              <option value={2}>2 потоки</option>
+              <option value={3}>3 потоки</option>
+              <option value={4}>4 потоки</option>
+            </select>
+          </div>
+          <button
+            type='button'
+            className={baseStyles.button}
+            onClick={runLab4EvolutionSearch}
+            disabled={isLab4EvolutionRunning || lab3Candidates.length === 0}
+          >
+            {isLab4EvolutionRunning ? 'Розрахунок...' : 'Запустити розподілений ГА'}
+          </button>
+        </div>
+
+        {lab4EvolutionProgress && (
+          <div className={styles.resultCard}>
+            <p className={styles.sectionText}>
+              Покоління: {lab4EvolutionProgress.generation} / {lab4EvolutionProgress.totalGenerations}
+            </p>
+            <p className={styles.sectionText}>
+              Поточний час: {lab4EvolutionProgress.durationMs} мс
+            </p>
+            <p className={styles.sectionText}>
+              Потоки: {lab4EvolutionThreadCount}, популяція:{' '}
+              {Math.min(Math.max(lab3Candidates.length * 12, 48), 160)}
+            </p>
+          </div>
+        )}
+
+        {lab4EvolutionError && (
+          <p className={`${styles.sectionText} ${styles.muted}`}>{lab4EvolutionError}</p>
+        )}
+
+        {lab4EvolutionResult && (
+          <>
+            <div className={styles.resultCard}>
+              <p className={styles.sectionText}>
+                Фітнес-функція:{' '}
+                {lab4EvolutionResult.objective === 'min-sum'
+                  ? 'Мінімальна сума відстаней'
+                  : 'MinMax'}
+              </p>
+              <p className={styles.sectionText}>
+                Найкраще ранжування: {lab4EvolutionResult.bestRanking.join(' > ')}
+              </p>
+              <p className={styles.sectionText}>
+                Сума відстаней: {lab4EvolutionResult.bestSumDistance}
+              </p>
+              <p className={styles.sectionText}>
+                Максимальна відстань: {lab4EvolutionResult.bestMaxDistance}
+              </p>
+              <p className={styles.sectionText}>
+                Потоків: {lab4EvolutionThreadCount}, поколінь: {lab4EvolutionResult.generations},
+                час: {lab4EvolutionResult.durationMs} мс
+              </p>
+            </div>
+            {lab4EvolutionResult.topRankings.length > 0 &&
+              renderSolutionTable(
+                lab4EvolutionResult.objective === 'min-sum'
+                  ? 'Найкращі рішення розподіленого ГА за сумою'
+                  : 'Найкращі рішення розподіленого ГА за критерієм MinMax',
+                lab4EvolutionResult.topRankings.map((item) => ({
+                  ranking: item.ranking,
+                  sumDistance: item.sumDistance,
+                  maxDistance: item.maxDistance,
+                  distances: []
+                })),
+                lab4EvolutionResult.objective
+              )}
+          </>
+        )}
+      </section>
+
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>Порівняння розподіленого ГА ЛР4 та ГА ЛР3</h2>
+        {lab3EvolutionResult && lab4EvolutionResult ? (
+          geneticComparisonReady ? (
+            <>
+              <div className={styles.infoGrid}>
+                <article className={styles.infoCard}>
+                  <span className={styles.infoLabel}>Час ГА ЛР3</span>
+                  <span className={styles.infoValue}>{lab3EvolutionResult.durationMs} мс</span>
+                  <span className={styles.infoMeta}>
+                    Централізоване обчислення в одному потоці без Web Workers.
+                  </span>
+                </article>
+                <article className={styles.infoCard}>
+                  <span className={styles.infoLabel}>Час розподіленого ГА ЛР4</span>
+                  <span className={styles.infoValue}>{lab4EvolutionResult.durationMs} мс</span>
+                  <span className={styles.infoMeta}>
+                    Оцінювання популяції виконується у {lab4EvolutionThreadCount} потоках.
+                  </span>
+                </article>
+                <article className={styles.infoCard}>
+                  <span className={styles.infoLabel}>Покращення розв&apos;язку</span>
+                  <span className={styles.infoValue}>
+                    {geneticObjectiveImprovement === null
+                      ? '-'
+                      : geneticObjectiveImprovement > 0
+                        ? `+${geneticObjectiveImprovement}`
+                        : `${geneticObjectiveImprovement}`}
+                  </span>
+                  <span className={styles.infoMeta}>
+                    {lab4EvolutionResult.objective === 'min-sum'
+                      ? 'Додатне значення означає меншу суму відстаней у ЛР4.'
+                      : 'Додатне значення означає менше значення Max у ЛР4.'}
+                  </span>
+                </article>
+              </div>
+
+              <div className={styles.tableWrap}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Метод</th>
+                      <th>Найкраще ранжування</th>
+                      <th>Σd</th>
+                      <th>Max</th>
+                      <th>Час</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>ГА ЛР3</td>
+                      <td className={styles.sequenceCell}>
+                        {lab3EvolutionResult.bestRanking.join(' > ')}
+                      </td>
+                      <td>{lab3EvolutionResult.bestSumDistance}</td>
+                      <td>{lab3EvolutionResult.bestMaxDistance}</td>
+                      <td>{lab3EvolutionResult.durationMs} мс</td>
+                    </tr>
+                    <tr>
+                      <td>Розподілений ГА ЛР4</td>
+                      <td className={styles.sequenceCell}>
+                        {lab4EvolutionResult.bestRanking.join(' > ')}
+                      </td>
+                      <td>{lab4EvolutionResult.bestSumDistance}</td>
+                      <td>{lab4EvolutionResult.bestMaxDistance}</td>
+                      <td>{lab4EvolutionResult.durationMs} мс</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div className={styles.noteCard}>
+                <p className={styles.sectionText}>
+                  Висновок: розподілений генетичний алгоритм ЛР4{' '}
+                  {geneticObjectiveImprovement !== null && geneticObjectiveImprovement > 0
+                    ? 'знайшов кращий розв’язок'
+                    : geneticObjectiveImprovement === 0
+                      ? 'дав такий самий за якістю розв’язок'
+                      : 'поки не перевершив централізований ГА ЛР3'}{' '}
+                  і {geneticTimeImprovement !== null && geneticTimeImprovement > 0
+                    ? `виконався швидше на ${geneticTimeImprovement} мс.`
+                    : geneticTimeImprovement === 0
+                      ? 'показав той самий час виконання.'
+                      : geneticTimeImprovement !== null
+                        ? `виконався повільніше на ${Math.abs(geneticTimeImprovement)} мс.`
+                        : 'має недоступне порівняння часу.'}
+                </p>
+              </div>
+            </>
+          ) : (
+            <p className={`${styles.sectionText} ${styles.muted}`}>
+              Для коректного порівняння запусти ГА в ЛР3 і ЛР4 з однаковою фітнес-функцією.
+            </p>
+          )
+        ) : (
+          <p className={`${styles.sectionText} ${styles.muted}`}>
+            Спочатку потрібно отримати результат ГА в ЛР3 та запустити розподілений ГА в ЛР4.
           </p>
         )}
       </section>
