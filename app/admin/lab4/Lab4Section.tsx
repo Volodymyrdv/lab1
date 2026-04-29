@@ -20,6 +20,9 @@ type DistributedWorkerResult = {
   workerId: number;
   prefix: string[];
   permutationsProcessed: number;
+  startedAtMs?: number;
+  finishedAtMs?: number;
+  durationMs?: number;
   minSumBest: ExhaustiveRankingResult | null;
   minMaxBest: ExhaustiveRankingResult | null;
 };
@@ -63,6 +66,18 @@ type Lab4EvolutionProgress = {
   generation: number;
   totalGenerations: number;
   durationMs: number;
+};
+
+type Lab4Method = 'distributed-search' | 'distributed-ga';
+
+type ExpertSatisfactionRow = {
+  expert: string;
+  ranking: string[];
+  ranks: number[];
+  minSumDistance: number;
+  minSumSatisfaction: number;
+  minMaxDistance: number;
+  minMaxSatisfaction: number;
 };
 
 type WorkerProgressMessage = {
@@ -129,6 +144,35 @@ const compareMinMaxResults = (left: ExhaustiveRankingResult, right: ExhaustiveRa
   left.maxDistance - right.maxDistance ||
   left.sumDistance - right.sumDistance ||
   compareRankingsAlphabetically(left.ranking, right.ranking);
+
+const calculateRankDistance = (ranking: string[], expertRanking: string[]) => {
+  const rankByCandidate = new Map(ranking.map((candidate, index) => [candidate, index + 1]));
+
+  return expertRanking.reduce((distance, candidate, expertIndex) => {
+    const compromiseRank = rankByCandidate.get(candidate);
+
+    if (!compromiseRank) {
+      return distance;
+    }
+
+    return distance + Math.abs(expertIndex + 1 - compromiseRank);
+  }, 0);
+};
+
+const getRanksByCandidateOrder = (ranking: string[], candidates: string[]) =>
+  candidates.map((candidate) => ranking.indexOf(candidate) + 1);
+
+const calculateExpertSatisfaction = (distance: number, candidateCount: number) => {
+  const maxDistance = (candidateCount ** 3 - candidateCount) / 3;
+
+  if (maxDistance <= 0) {
+    return 100;
+  }
+
+  return Math.max(0, (1 - distance / maxDistance) * 100);
+};
+
+const formatPercent = (value: number) => `${value.toFixed(2)}%`;
 
 const appendUniqueSolution = (
   collection: ExhaustiveRankingResult[],
@@ -344,7 +388,13 @@ const evaluatePopulationWithWorkers = async (
           type: 'module'
         });
 
-        worker.onmessage = (event: MessageEvent<{ type: 'done' | 'error'; scores?: EvolutionRankingScore[]; error?: string }>) => {
+        worker.onmessage = (
+          event: MessageEvent<{
+            type: 'done' | 'error';
+            scores?: EvolutionRankingScore[];
+            error?: string;
+          }>
+        ) => {
           const message = event.data;
           worker.terminate();
 
@@ -382,6 +432,7 @@ export function Lab4Section({
   onRegenerateLab3ExpertRankings,
   formatRankingOrderNumbers
 }: Lab4SectionProps) {
+  const [activeLab4Method, setActiveLab4Method] = useState<Lab4Method>('distributed-search');
   const [distributedSearch, setDistributedSearch] = useState<DistributedSearchResult | null>(null);
   const [distributedProgress, setDistributedProgress] = useState<DistributedSearchProgress | null>(
     null
@@ -468,6 +519,7 @@ export function Lab4Section({
       const startedAt = performance.now();
       const progressByWorker = new Map<number, number>();
       const resultsByWorker = new Map<number, DistributedWorkerResult>();
+      const workerStartedAt = new Map<number, number>();
       let completedWorkers = 0;
       let failed = false;
 
@@ -546,7 +598,9 @@ export function Lab4Section({
         if (!globalMinSumBest || !globalMinMaxBest) {
           failed = true;
           activeSearchSignatureRef.current = null;
-          setDistributedSearchError('Не вдалося зібрати глобальний результат розподіленого перебору.');
+          setDistributedSearchError(
+            'Не вдалося зібрати глобальний результат розподіленого перебору.'
+          );
           setDistributedSearch(null);
           setIsDistributedSearchRunning(false);
           stopWorkers();
@@ -578,10 +632,9 @@ export function Lab4Section({
       currentCandidates.forEach((candidate, index) => {
         const workerId = index + 1;
         progressByWorker.set(workerId, 0);
-        const worker = new Worker(
-          new URL('./distributedPermutation.worker.ts', import.meta.url),
-          { type: 'module' }
-        );
+        const worker = new Worker(new URL('./distributedPermutation.worker.ts', import.meta.url), {
+          type: 'module'
+        });
 
         worker.onmessage = (event: MessageEvent<WorkerMessage>) => {
           if (isCancelled || failed) {
@@ -597,11 +650,15 @@ export function Lab4Section({
           }
 
           if (message.type === 'done') {
-            resultsByWorker.set(message.result.workerId, message.result);
-            progressByWorker.set(
-              message.result.workerId,
-              message.result.permutationsProcessed
-            );
+            const finishedAtMs = Math.round(performance.now() - startedAt);
+            const workerStartMs = workerStartedAt.get(message.result.workerId) ?? 0;
+            resultsByWorker.set(message.result.workerId, {
+              ...message.result,
+              startedAtMs: workerStartMs,
+              finishedAtMs,
+              durationMs: finishedAtMs - workerStartMs
+            });
+            progressByWorker.set(message.result.workerId, message.result.permutationsProcessed);
             completedWorkers += 1;
             publishProgress();
             finishIfReady();
@@ -630,6 +687,7 @@ export function Lab4Section({
         };
 
         workers.push(worker);
+        workerStartedAt.set(workerId, Math.round(performance.now() - startedAt));
         worker.postMessage({
           workerId,
           prefix: [candidate],
@@ -682,6 +740,32 @@ export function Lab4Section({
     distributedSearch && lab3ExhaustiveSearch
       ? distributedSearch.durationMs - lab3ExhaustiveSearch.durationMs
       : null;
+  const expertSatisfactionRows = useMemo<ExpertSatisfactionRow[]>(() => {
+    if (!distributedSearch) {
+      return [];
+    }
+
+    return lab3ExpertRankings.map((expertRow) => {
+      const minSumDistance = calculateRankDistance(
+        distributedSearch.minSumBest.ranking,
+        expertRow.ranking
+      );
+      const minMaxDistance = calculateRankDistance(
+        distributedSearch.minMaxBest.ranking,
+        expertRow.ranking
+      );
+
+      return {
+        expert: expertRow.expert,
+        ranking: expertRow.ranking,
+        ranks: getRanksByCandidateOrder(expertRow.ranking, lab3Candidates),
+        minSumDistance,
+        minSumSatisfaction: calculateExpertSatisfaction(minSumDistance, lab3Candidates.length),
+        minMaxDistance,
+        minMaxSatisfaction: calculateExpertSatisfaction(minMaxDistance, lab3Candidates.length)
+      };
+    });
+  }, [distributedSearch, lab3Candidates, lab3ExpertRankings]);
   const geneticComparisonReady =
     Boolean(lab3EvolutionResult && lab4EvolutionResult) &&
     lab3EvolutionResult!.objective === lab4EvolutionResult!.objective;
@@ -740,9 +824,7 @@ export function Lab4Section({
 
       for (let generation = 1; generation <= generations; generation += 1) {
         for (let index = 1; index < evaluated.length; index += 1) {
-          if (
-            compareObjectiveScores(evaluated[index], best, lab4EvolutionObjective) < 0
-          ) {
+          if (compareObjectiveScores(evaluated[index], best, lab4EvolutionObjective) < 0) {
             best = evaluated[index];
           }
         }
@@ -917,485 +999,583 @@ export function Lab4Section({
       </section>
 
       <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Схема декомпозиції прямого перебору</h2>
-        <p className={styles.sectionText}>
-          Простір усіх перестановок розбиваємо на неперетинні підмножини за першим елементом
-          ранжування. Для кожного можливого першого елемента запускається окремий Web Worker, який
-          перебирає всі перестановки решти {Math.max(lab3Candidates.length - 1, 0)} об&apos;єктів.
-        </p>
-        <div className={styles.infoGrid}>
-          <article className={styles.infoCard}>
-            <span className={styles.infoLabel}>Кількість worker-підзадач</span>
-            <span className={styles.infoValue}>{lab3Candidates.length}</span>
-            <span className={styles.infoMeta}>
-              Один реальний Web Worker на кожен можливий перший елемент перестановки.
-            </span>
-          </article>
-          <article className={styles.infoCard}>
-            <span className={styles.infoLabel}>Розмір підзадачі</span>
-            <span className={styles.infoValue}>{expectedWorkerPermutations}</span>
-            <span className={styles.infoMeta}>
-              Кожна worker-підзадача містить рівно (n-1)! перестановок.
-            </span>
-          </article>
-          <article className={styles.infoCard}>
-            <span className={styles.infoLabel}>Доведення покриття</span>
-            <span className={styles.infoValue}>
-              {lab3Candidates.length} * {expectedWorkerPermutations} = {factorial(lab3Candidates.length)}
-            </span>
-            <span className={styles.infoMeta}>
-              Кожна перестановка має єдиний перший елемент, тому буде оброблена рівно одним worker.
-            </span>
-          </article>
+        <div className={styles.sectionHeaderInline}>
+          <div>
+            <h2 className={styles.sectionTitle}>Навігація ЛР4</h2>
+            <p className={styles.sectionText}>
+              Обери метод, щоб показати тільки відповідні результати та порівняння.
+            </p>
+          </div>
+          <div className={styles.lab4Subnav} role='tablist' aria-label='Методи ЛР4'>
+            <button
+              type='button'
+              role='tab'
+              aria-selected={activeLab4Method === 'distributed-search'}
+              className={`${styles.lab4SubnavButton} ${
+                activeLab4Method === 'distributed-search' ? styles.lab4SubnavButtonActive : ''
+              }`}
+              onClick={() => setActiveLab4Method('distributed-search')}
+            >
+              Розподілений прямий перебір
+            </button>
+            <button
+              type='button'
+              role='tab'
+              aria-selected={activeLab4Method === 'distributed-ga'}
+              className={`${styles.lab4SubnavButton} ${
+                activeLab4Method === 'distributed-ga' ? styles.lab4SubnavButtonActive : ''
+              }`}
+              onClick={() => setActiveLab4Method('distributed-ga')}
+            >
+              Розподілений ГА
+            </button>
+          </div>
         </div>
       </section>
 
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Розподілений прямий перебір перестановок</h2>
-        {distributedProgress && (
-          <div className={styles.resultCard}>
+      {activeLab4Method === 'distributed-search' ? (
+        <>
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>Схема декомпозиції прямого перебору</h2>
             <p className={styles.sectionText}>
-              Статус: {isDistributedSearchRunning ? 'обрахунок триває' : 'обрахунок завершено'}
+              Простір усіх перестановок розбиваємо на неперетинні підмножини за першим елементом
+              ранжування. Для кожного можливого першого елемента запускається окремий Web Worker,
+              який перебирає всі перестановки решти {Math.max(lab3Candidates.length - 1, 0)}{' '}
+              об&apos;єктів.
             </p>
-            <p className={styles.sectionText}>
-              Опрацьовано перестановок: {distributedProgress.processedPermutations} /{' '}
-              {distributedProgress.totalPermutations} ({distributedProgressPercent}%)
-            </p>
-            <p className={styles.sectionText}>
-              Завершено worker-підзадач: {distributedProgress.completedWorkers} /{' '}
-              {distributedProgress.totalWorkers}
-            </p>
-            <p className={styles.sectionText}>Поточний час: {distributedProgress.durationMs} мс</p>
-          </div>
-        )}
-        {distributedSearchError && (
-          <p className={`${styles.sectionText} ${styles.muted}`}>{distributedSearchError}</p>
-        )}
-        {distributedSearch ? (
-          <>
             <div className={styles.infoGrid}>
               <article className={styles.infoCard}>
-                <span className={styles.infoLabel}>Перебрано</span>
-                <span className={styles.infoValue}>{distributedSearch.totalPermutations}</span>
+                <span className={styles.infoLabel}>Кількість worker-підзадач</span>
+                <span className={styles.infoValue}>{lab3Candidates.length}</span>
                 <span className={styles.infoMeta}>
-                  Результат зібраний з {distributedSearch.workers.length} реальних Web Workers.
+                  Один реальний Web Worker на кожен можливий перший елемент перестановки.
                 </span>
               </article>
               <article className={styles.infoCard}>
-                <span className={styles.infoLabel}>Час ЛР4</span>
-                <span className={styles.infoValue}>{distributedSearch.durationMs} мс</span>
+                <span className={styles.infoLabel}>Розмір підзадачі</span>
+                <span className={styles.infoValue}>{expectedWorkerPermutations}</span>
                 <span className={styles.infoMeta}>
-                  Головний потік тільки координує роботу, а сам перебір виконують worker-и.
+                  Кожна worker-підзадача містить рівно (n-1)! перестановок.
                 </span>
               </article>
               <article className={styles.infoCard}>
-                <span className={styles.infoLabel}>Контроль покриття</span>
+                <span className={styles.infoLabel}>Доведення покриття</span>
                 <span className={styles.infoValue}>
-                  {coverageCheckPassed ? 'Пройдено' : 'Помилка'}
+                  {lab3Candidates.length} * {expectedWorkerPermutations} ={' '}
+                  {factorial(lab3Candidates.length)}
                 </span>
                 <span className={styles.infoMeta}>
-                  У кожній підзадачі перебрано рівно {expectedWorkerPermutations} перестановок.
+                  Кожна перестановка має єдиний перший елемент, тому буде оброблена рівно одним
+                  worker.
                 </span>
               </article>
             </div>
+          </section>
 
-            <div className={styles.subSection}>
-              <h3 className={styles.subTitle}>Усі підзадачі розподіленого перебору</h3>
-              <div className={styles.tableWrap}>
-                <table className={styles.table}>
-                  <thead>
-                    <tr>
-                      <th>Підзадача</th>
-                      <th>Фіксований префікс</th>
-                      <th>Перестановок</th>
-                      <th>Локальний мінімум Σd</th>
-                      <th>Локальний мінімум Max</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {distributedSearch.workers.map((worker) => (
-                      <tr key={`worker-${worker.workerId}`}>
-                        <td>Worker {worker.workerId}</td>
-                        <td>{worker.prefix.join(' > ')}</td>
-                        <td>{worker.permutationsProcessed}</td>
-                        <td className={styles.sequenceCell}>
-                          {worker.minSumBest
-                            ? `${worker.minSumBest.ranking.join(' > ')} | Σd=${worker.minSumBest.sumDistance}, Max=${worker.minSumBest.maxDistance}`
-                            : '-'}
-                        </td>
-                        <td className={styles.sequenceCell}>
-                          {worker.minMaxBest
-                            ? `${worker.minMaxBest.ranking.join(' > ')} | Max=${worker.minMaxBest.maxDistance}, Σd=${worker.minMaxBest.sumDistance}`
-                            : '-'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className={styles.subSection}>
-              <h3 className={styles.subTitle}>
-                Компромісні ранжування за критерієм мінімальної суми
-              </h3>
-              <div className={styles.highlightResultCard}>
-                <span className={styles.highlightResultBadge}>
-                  Представник множини розв&apos;язків
-                </span>
-                <p className={styles.highlightResultOrder}>
-                  {formatRankingOrderNumbers(distributedSearch.minSumBest.ranking, lab3Candidates)}
-                </p>
-                <p className={styles.highlightResultText}>
-                  {distributedSearch.minSumBest.ranking.join(' > ')}
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>Розподілений прямий перебір перестановок</h2>
+            {distributedProgress && (
+              <div className={styles.resultCard}>
+                <p className={styles.sectionText}>
+                  Статус: {isDistributedSearchRunning ? 'обрахунок триває' : 'обрахунок завершено'}
                 </p>
                 <p className={styles.sectionText}>
-                  Σd = {distributedSearch.minSumBest.sumDistance}, Max ={' '}
-                  {distributedSearch.minSumBest.maxDistance}
-                </p>
-              </div>
-              {renderSolutionTable(
-                'Усі одержані розв’язки з мінімальною сумою',
-                distributedSearch.minSumSolutions,
-                'min-sum'
-              )}
-            </div>
-
-            <div className={styles.subSection}>
-              <h3 className={styles.subTitle}>Компромісні ранжування за критерієм MinMax</h3>
-              <div className={styles.highlightResultCard}>
-                <span className={styles.highlightResultBadge}>
-                  Представник множини розв&apos;язків
-                </span>
-                <p className={styles.highlightResultOrder}>
-                  {formatRankingOrderNumbers(distributedSearch.minMaxBest.ranking, lab3Candidates)}
-                </p>
-                <p className={styles.highlightResultText}>
-                  {distributedSearch.minMaxBest.ranking.join(' > ')}
+                  Опрацьовано перестановок: {distributedProgress.processedPermutations} /{' '}
+                  {distributedProgress.totalPermutations} ({distributedProgressPercent}%)
                 </p>
                 <p className={styles.sectionText}>
-                  Max = {distributedSearch.minMaxBest.maxDistance}, Σd ={' '}
-                  {distributedSearch.minMaxBest.sumDistance}
+                  Завершено worker-підзадач: {distributedProgress.completedWorkers} /{' '}
+                  {distributedProgress.totalWorkers}
                 </p>
-              </div>
-              {renderSolutionTable(
-                'Усі одержані розв’язки за критерієм MinMax',
-                distributedSearch.minMaxSolutions,
-                'min-max'
-              )}
-            </div>
-          </>
-        ) : (
-          <p className={`${styles.sectionText} ${styles.muted}`}>
-            {isDistributedSearchRunning
-              ? 'Реальний паралельний перебір у worker-ах вже виконується. Результати з’являться після завершення.'
-              : 'Для запуску розподіленого перебору потрібні об’єкти та ранжування експертів.'}
-          </p>
-        )}
-      </section>
-
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Розподілений генетичний алгоритм</h2>
-        <p className={styles.sectionText}>
-          У ЛР4 оцінювання популяції виконується паралельно через Web Workers. Кількість потоків
-          можна обрати вручну: 2, 3 або 4.
-        </p>
-        <div className={styles.controlRow}>
-          <div className={baseStyles.inputGroup}>
-            <label htmlFor='lab4-ga-objective' className={styles.controlLabel}>
-              Фітнес-функція
-            </label>
-            <select
-              id='lab4-ga-objective'
-              value={lab4EvolutionObjective}
-              onChange={(e) =>
-                setLab4EvolutionObjective(e.target.value as 'min-sum' | 'min-max')
-              }
-              className={styles.select}
-            >
-              <option value='min-sum'>Мінімальна сума відстаней</option>
-              <option value='min-max'>MinMax</option>
-            </select>
-          </div>
-          <div className={baseStyles.inputGroup}>
-            <label htmlFor='lab4-ga-threads' className={styles.controlLabel}>
-              Кількість потоків
-            </label>
-            <select
-              id='lab4-ga-threads'
-              value={lab4EvolutionThreadCount}
-              onChange={(e) =>
-                setLab4EvolutionThreadCount(
-                  Number.parseInt(e.target.value, 10) as 2 | 3 | 4
-                )
-              }
-              className={styles.select}
-            >
-              <option value={2}>2 потоки</option>
-              <option value={3}>3 потоки</option>
-              <option value={4}>4 потоки</option>
-            </select>
-          </div>
-          <button
-            type='button'
-            className={baseStyles.button}
-            onClick={runLab4EvolutionSearch}
-            disabled={isLab4EvolutionRunning || lab3Candidates.length === 0}
-          >
-            {isLab4EvolutionRunning ? 'Розрахунок...' : 'Запустити розподілений ГА'}
-          </button>
-        </div>
-
-        {lab4EvolutionProgress && (
-          <div className={styles.resultCard}>
-            <p className={styles.sectionText}>
-              Покоління: {lab4EvolutionProgress.generation} / {lab4EvolutionProgress.totalGenerations}
-            </p>
-            <p className={styles.sectionText}>
-              Поточний час: {lab4EvolutionProgress.durationMs} мс
-            </p>
-            <p className={styles.sectionText}>
-              Потоки: {lab4EvolutionThreadCount}, популяція:{' '}
-              {Math.min(Math.max(lab3Candidates.length * 12, 48), 160)}
-            </p>
-          </div>
-        )}
-
-        {lab4EvolutionError && (
-          <p className={`${styles.sectionText} ${styles.muted}`}>{lab4EvolutionError}</p>
-        )}
-
-        {lab4EvolutionResult && (
-          <>
-            <div className={styles.resultCard}>
-              <p className={styles.sectionText}>
-                Фітнес-функція:{' '}
-                {lab4EvolutionResult.objective === 'min-sum'
-                  ? 'Мінімальна сума відстаней'
-                  : 'MinMax'}
-              </p>
-              <p className={styles.sectionText}>
-                Найкраще ранжування: {lab4EvolutionResult.bestRanking.join(' > ')}
-              </p>
-              <p className={styles.sectionText}>
-                Сума відстаней: {lab4EvolutionResult.bestSumDistance}
-              </p>
-              <p className={styles.sectionText}>
-                Максимальна відстань: {lab4EvolutionResult.bestMaxDistance}
-              </p>
-              <p className={styles.sectionText}>
-                Потоків: {lab4EvolutionThreadCount}, поколінь: {lab4EvolutionResult.generations},
-                час: {lab4EvolutionResult.durationMs} мс
-              </p>
-            </div>
-            {lab4EvolutionResult.topRankings.length > 0 &&
-              renderSolutionTable(
-                lab4EvolutionResult.objective === 'min-sum'
-                  ? 'Найкращі рішення розподіленого ГА за сумою'
-                  : 'Найкращі рішення розподіленого ГА за критерієм MinMax',
-                lab4EvolutionResult.topRankings.map((item) => ({
-                  ranking: item.ranking,
-                  sumDistance: item.sumDistance,
-                  maxDistance: item.maxDistance,
-                  distances: []
-                })),
-                lab4EvolutionResult.objective
-              )}
-          </>
-        )}
-      </section>
-
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Порівняння розподіленого ГА ЛР4 та ГА ЛР3</h2>
-        {lab3EvolutionResult && lab4EvolutionResult ? (
-          geneticComparisonReady ? (
-            <>
-              <div className={styles.infoGrid}>
-                <article className={styles.infoCard}>
-                  <span className={styles.infoLabel}>Час ГА ЛР3</span>
-                  <span className={styles.infoValue}>{lab3EvolutionResult.durationMs} мс</span>
-                  <span className={styles.infoMeta}>
-                    Централізоване обчислення в одному потоці без Web Workers.
-                  </span>
-                </article>
-                <article className={styles.infoCard}>
-                  <span className={styles.infoLabel}>Час розподіленого ГА ЛР4</span>
-                  <span className={styles.infoValue}>{lab4EvolutionResult.durationMs} мс</span>
-                  <span className={styles.infoMeta}>
-                    Оцінювання популяції виконується у {lab4EvolutionThreadCount} потоках.
-                  </span>
-                </article>
-                <article className={styles.infoCard}>
-                  <span className={styles.infoLabel}>Покращення розв&apos;язку</span>
-                  <span className={styles.infoValue}>
-                    {geneticObjectiveImprovement === null
-                      ? '-'
-                      : geneticObjectiveImprovement > 0
-                        ? `+${geneticObjectiveImprovement}`
-                        : `${geneticObjectiveImprovement}`}
-                  </span>
-                  <span className={styles.infoMeta}>
-                    {lab4EvolutionResult.objective === 'min-sum'
-                      ? 'Додатне значення означає меншу суму відстаней у ЛР4.'
-                      : 'Додатне значення означає менше значення Max у ЛР4.'}
-                  </span>
-                </article>
-              </div>
-
-              <div className={styles.tableWrap}>
-                <table className={styles.table}>
-                  <thead>
-                    <tr>
-                      <th>Метод</th>
-                      <th>Найкраще ранжування</th>
-                      <th>Σd</th>
-                      <th>Max</th>
-                      <th>Час</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>ГА ЛР3</td>
-                      <td className={styles.sequenceCell}>
-                        {lab3EvolutionResult.bestRanking.join(' > ')}
-                      </td>
-                      <td>{lab3EvolutionResult.bestSumDistance}</td>
-                      <td>{lab3EvolutionResult.bestMaxDistance}</td>
-                      <td>{lab3EvolutionResult.durationMs} мс</td>
-                    </tr>
-                    <tr>
-                      <td>Розподілений ГА ЛР4</td>
-                      <td className={styles.sequenceCell}>
-                        {lab4EvolutionResult.bestRanking.join(' > ')}
-                      </td>
-                      <td>{lab4EvolutionResult.bestSumDistance}</td>
-                      <td>{lab4EvolutionResult.bestMaxDistance}</td>
-                      <td>{lab4EvolutionResult.durationMs} мс</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <div className={styles.noteCard}>
                 <p className={styles.sectionText}>
-                  Висновок: розподілений генетичний алгоритм ЛР4{' '}
-                  {geneticObjectiveImprovement !== null && geneticObjectiveImprovement > 0
-                    ? 'знайшов кращий розв’язок'
-                    : geneticObjectiveImprovement === 0
-                      ? 'дав такий самий за якістю розв’язок'
-                      : 'поки не перевершив централізований ГА ЛР3'}{' '}
-                  і {geneticTimeImprovement !== null && geneticTimeImprovement > 0
-                    ? `виконався швидше на ${geneticTimeImprovement} мс.`
-                    : geneticTimeImprovement === 0
-                      ? 'показав той самий час виконання.'
-                      : geneticTimeImprovement !== null
-                        ? `виконався повільніше на ${Math.abs(geneticTimeImprovement)} мс.`
-                        : 'має недоступне порівняння часу.'}
+                  Поточний час: {distributedProgress.durationMs} мс
                 </p>
               </div>
-            </>
-          ) : (
-            <p className={`${styles.sectionText} ${styles.muted}`}>
-              Для коректного порівняння запусти ГА в ЛР3 і ЛР4 з однаковою фітнес-функцією.
-            </p>
-          )
-        ) : (
-          <p className={`${styles.sectionText} ${styles.muted}`}>
-            Спочатку потрібно отримати результат ГА в ЛР3 та запустити розподілений ГА в ЛР4.
-          </p>
-        )}
-      </section>
+            )}
+            {distributedSearchError && (
+              <p className={`${styles.sectionText} ${styles.muted}`}>{distributedSearchError}</p>
+            )}
+            {distributedSearch ? (
+              <>
+                <div className={styles.infoGrid}>
+                  <article className={styles.infoCard}>
+                    <span className={styles.infoLabel}>Перебрано</span>
+                    <span className={styles.infoValue}>{distributedSearch.totalPermutations}</span>
+                    <span className={styles.infoMeta}>
+                      Результат зібраний з {distributedSearch.workers.length} реальних Web Workers.
+                    </span>
+                  </article>
+                  <article className={styles.infoCard}>
+                    <span className={styles.infoLabel}>Час ЛР4</span>
+                    <span className={styles.infoValue}>{distributedSearch.durationMs} мс</span>
+                    <span className={styles.infoMeta}>
+                      Головний потік тільки координує роботу, а сам перебір виконують worker-и.
+                    </span>
+                  </article>
+                  <article className={styles.infoCard}>
+                    <span className={styles.infoLabel}>Контроль покриття</span>
+                    <span className={styles.infoValue}>
+                      {coverageCheckPassed ? 'Пройдено' : 'Помилка'}
+                    </span>
+                    <span className={styles.infoMeta}>
+                      У кожній підзадачі перебрано рівно {expectedWorkerPermutations} перестановок.
+                    </span>
+                  </article>
+                </div>
 
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Порівняння результатів ЛР4 та ЛР3</h2>
-        {distributedSearch && lab3ExhaustiveSearch ? (
-          <>
-            <div className={styles.infoGrid}>
-              <article className={styles.infoCard}>
-                <span className={styles.infoLabel}>Час прямого перебору ЛР3</span>
-                <span className={styles.infoValue}>{lab3ExhaustiveSearch.durationMs} мс</span>
-                <span className={styles.infoMeta}>
-                  Повний перебір усіх перестановок в одному потоці без worker-декомпозиції.
-                </span>
-              </article>
-              <article className={styles.infoCard}>
-                <span className={styles.infoLabel}>Час розподіленого перебору ЛР4</span>
-                <span className={styles.infoValue}>{distributedSearch.durationMs} мс</span>
-                <span className={styles.infoMeta}>
-                  Паралельний перебір із реальними Web Workers для окремих підзадач.
-                </span>
-              </article>
-              <article className={styles.infoCard}>
-                <span className={styles.infoLabel}>Різниця часу</span>
-                <span className={styles.infoValue}>
-                  {directVsDistributedTimeDelta === null
-                    ? '-'
-                    : directVsDistributedTimeDelta === 0
-                      ? '0 мс'
-                      : `${directVsDistributedTimeDelta > 0 ? '+' : ''}${directVsDistributedTimeDelta} мс`}
-                </span>
-                <span className={styles.infoMeta}>
-                  {directVsDistributedTimeDelta === null
-                    ? 'Порівняння часу недоступне.'
-                    : directVsDistributedTimeDelta > 0
-                      ? 'ЛР4 з worker-ами спрацювала швидше за прямий перебір ЛР3.'
-                      : directVsDistributedTimeDelta < 0
-                        ? 'ЛР3 спрацювала швидше; накладні витрати на worker-и переважають.'
-                        : 'Обидва способи дали однаковий час виконання.'}
-                </span>
-              </article>
-            </div>
+                <div className={styles.subSection}>
+                  <h3 className={styles.subTitle}>Усі підзадачі розподіленого перебору</h3>
+                  <div className={styles.tableWrap}>
+                    <table className={styles.table}>
+                      <thead>
+                        <tr>
+                          <th>Підзадача</th>
+                          <th>Фіксований префікс</th>
+                          <th>Перестановок</th>
+                          <th>Старт</th>
+                          <th>Фініш</th>
+                          <th>Час worker-а</th>
+                          <th>Локальний мінімум Σd</th>
+                          <th>Локальний мінімум Max</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {distributedSearch.workers.map((worker) => (
+                          <tr key={`worker-${worker.workerId}`}>
+                            <td>Worker {worker.workerId}</td>
+                            <td>{worker.prefix.join(' > ')}</td>
+                            <td>{worker.permutationsProcessed}</td>
+                            <td>{worker.startedAtMs ?? '-'} мс</td>
+                            <td>{worker.finishedAtMs ?? '-'} мс</td>
+                            <td>{worker.durationMs ?? '-'} мс</td>
+                            <td className={styles.sequenceCell}>
+                              {worker.minSumBest
+                                ? `${worker.minSumBest.ranking.join(' > ')} | Σd=${worker.minSumBest.sumDistance}, Max=${worker.minSumBest.maxDistance}`
+                                : '-'}
+                            </td>
+                            <td className={styles.sequenceCell}>
+                              {worker.minMaxBest
+                                ? `${worker.minMaxBest.ranking.join(' > ')} | Max=${worker.minMaxBest.maxDistance}, Σd=${worker.minMaxBest.sumDistance}`
+                                : '-'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
 
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Критерій</th>
-                    <th>ЛР3</th>
-                    <th>ЛР4</th>
-                    <th>Збіг</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>Мінімальна сума відстаней</td>
-                    <td className={styles.sequenceCell}>
-                      {lab3ExhaustiveSearch.minSumBest.ranking.join(' > ')} | Σd=
-                      {lab3ExhaustiveSearch.minSumBest.sumDistance}, Max=
-                      {lab3ExhaustiveSearch.minSumBest.maxDistance}
-                    </td>
-                    <td className={styles.sequenceCell}>
-                      {distributedSearch.minSumBest.ranking.join(' > ')} | Σd=
-                      {distributedSearch.minSumBest.sumDistance}, Max=
+                <div className={styles.subSection}>
+                  <h3 className={styles.subTitle}>
+                    Компромісні ранжування за критерієм мінімальної суми
+                  </h3>
+                  <div className={styles.highlightResultCard}>
+                    <span className={styles.highlightResultBadge}>
+                      Представник множини розв&apos;язків
+                    </span>
+                    <p className={styles.highlightResultOrder}>
+                      {formatRankingOrderNumbers(
+                        distributedSearch.minSumBest.ranking,
+                        lab3Candidates
+                      )}
+                    </p>
+                    <p className={styles.highlightResultText}>
+                      {distributedSearch.minSumBest.ranking.join(' > ')}
+                    </p>
+                    <p className={styles.sectionText}>
+                      Σd = {distributedSearch.minSumBest.sumDistance}, Max ={' '}
                       {distributedSearch.minSumBest.maxDistance}
-                    </td>
-                    <td>{minSumMatchesLab3 ? 'Так' : 'Ні'}</td>
-                  </tr>
-                  <tr>
-                    <td>Критерій MinMax</td>
-                    <td className={styles.sequenceCell}>
-                      {lab3ExhaustiveSearch.minMaxBest.ranking.join(' > ')} | Max=
-                      {lab3ExhaustiveSearch.minMaxBest.maxDistance}, Σd=
-                      {lab3ExhaustiveSearch.minMaxBest.sumDistance}
-                    </td>
-                    <td className={styles.sequenceCell}>
-                      {distributedSearch.minMaxBest.ranking.join(' > ')} | Max=
-                      {distributedSearch.minMaxBest.maxDistance}, Σd=
+                    </p>
+                  </div>
+                  {renderSolutionTable(
+                    'Усі одержані розв’язки з мінімальною сумою',
+                    distributedSearch.minSumSolutions,
+                    'min-sum'
+                  )}
+                </div>
+
+                <div className={styles.subSection}>
+                  <h3 className={styles.subTitle}>Компромісні ранжування за критерієм MinMax</h3>
+                  <div className={styles.highlightResultCard}>
+                    <span className={styles.highlightResultBadge}>
+                      Представник множини розв&apos;язків
+                    </span>
+                    <p className={styles.highlightResultOrder}>
+                      {formatRankingOrderNumbers(
+                        distributedSearch.minMaxBest.ranking,
+                        lab3Candidates
+                      )}
+                    </p>
+                    <p className={styles.highlightResultText}>
+                      {distributedSearch.minMaxBest.ranking.join(' > ')}
+                    </p>
+                    <p className={styles.sectionText}>
+                      Max = {distributedSearch.minMaxBest.maxDistance}, Σd ={' '}
                       {distributedSearch.minMaxBest.sumDistance}
-                    </td>
-                    <td>{minMaxMatchesLab3 ? 'Так' : 'Ні'}</td>
-                  </tr>
-                </tbody>
-              </table>
+                    </p>
+                  </div>
+                  {renderSolutionTable(
+                    'Усі одержані розв’язки за критерієм MinMax',
+                    distributedSearch.minMaxSolutions,
+                    'min-max'
+                  )}
+                </div>
+
+                {expertSatisfactionRows.length > 0 && (
+                  <div className={styles.subSection}>
+                    <h3 className={styles.subTitle}>
+                      Індекси задоволеності експертів для розподіленого прямого перебору
+                    </h3>
+                    <p className={styles.sectionText}>
+                      Індекс рахується за формулою S = (1 - d / ((n³ - n) / 3)) * 100%, де d -
+                      сума модулів різниць рангів експерта і компромісного ранжування.
+                    </p>
+                    <div className={styles.tableWrap}>
+                      <table className={styles.table}>
+                        <thead>
+                          <tr>
+                            <th>Експерт</th>
+                            <th>Aᵢ - множинне ранжування</th>
+                            <th>Rᵢ - ранги об&apos;єктів</th>
+                            <th>d до min Σd</th>
+                            <th>S до min Σd</th>
+                            <th>d до MinMax</th>
+                            <th>S до MinMax</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {expertSatisfactionRows.map((row) => (
+                            <tr key={`satisfaction-${row.expert}`}>
+                              <td>{row.expert}</td>
+                              <td className={styles.sequenceCell}>{row.ranking.join(' > ')}</td>
+                              <td>{row.ranks.join(', ')}</td>
+                              <td>{row.minSumDistance}</td>
+                              <td>{formatPercent(row.minSumSatisfaction)}</td>
+                              <td>{row.minMaxDistance}</td>
+                              <td>{formatPercent(row.minMaxSatisfaction)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className={`${styles.sectionText} ${styles.muted}`}>
+                {isDistributedSearchRunning
+                  ? 'Реальний паралельний перебір у worker-ах вже виконується. Результати з’являться після завершення.'
+                  : 'Для запуску розподіленого перебору потрібні об’єкти та ранжування експертів.'}
+              </p>
+            )}
+          </section>
+
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>Порівняння результатів ЛР4 та ЛР3</h2>
+            {distributedSearch && lab3ExhaustiveSearch ? (
+              <>
+                <div className={styles.infoGrid}>
+                  <article className={styles.infoCard}>
+                    <span className={styles.infoLabel}>Час прямого перебору ЛР3</span>
+                    <span className={styles.infoValue}>{lab3ExhaustiveSearch.durationMs} мс</span>
+                    <span className={styles.infoMeta}>
+                      Повний перебір усіх перестановок в одному потоці без worker-декомпозиції.
+                    </span>
+                  </article>
+                  <article className={styles.infoCard}>
+                    <span className={styles.infoLabel}>Час розподіленого перебору ЛР4</span>
+                    <span className={styles.infoValue}>{distributedSearch.durationMs} мс</span>
+                    <span className={styles.infoMeta}>
+                      Паралельний перебір із реальними Web Workers для окремих підзадач.
+                    </span>
+                  </article>
+                  <article className={styles.infoCard}>
+                    <span className={styles.infoLabel}>Різниця часу</span>
+                    <span className={styles.infoValue}>
+                      {directVsDistributedTimeDelta === null
+                        ? '-'
+                        : directVsDistributedTimeDelta === 0
+                          ? '0 мс'
+                          : `${directVsDistributedTimeDelta > 0 ? '+' : ''}${directVsDistributedTimeDelta} мс`}
+                    </span>
+                    <span className={styles.infoMeta}>
+                      {directVsDistributedTimeDelta === null
+                        ? 'Порівняння часу недоступне.'
+                        : directVsDistributedTimeDelta > 0
+                          ? 'ЛР4 з worker-ами спрацювала швидше за прямий перебір ЛР3.'
+                          : directVsDistributedTimeDelta < 0
+                            ? 'ЛР3 спрацювала швидше; накладні витрати на worker-и переважають.'
+                            : 'Обидва способи дали однаковий час виконання.'}
+                    </span>
+                  </article>
+                </div>
+
+                <div className={styles.tableWrap}>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th>Критерій</th>
+                        <th>ЛР3</th>
+                        <th>ЛР4</th>
+                        <th>Збіг</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>Мінімальна сума відстаней</td>
+                        <td className={styles.sequenceCell}>
+                          {lab3ExhaustiveSearch.minSumBest.ranking.join(' > ')} | Σd=
+                          {lab3ExhaustiveSearch.minSumBest.sumDistance}, Max=
+                          {lab3ExhaustiveSearch.minSumBest.maxDistance}
+                        </td>
+                        <td className={styles.sequenceCell}>
+                          {distributedSearch.minSumBest.ranking.join(' > ')} | Σd=
+                          {distributedSearch.minSumBest.sumDistance}, Max=
+                          {distributedSearch.minSumBest.maxDistance}
+                        </td>
+                        <td>{minSumMatchesLab3 ? 'Так' : 'Ні'}</td>
+                      </tr>
+                      <tr>
+                        <td>Критерій MinMax</td>
+                        <td className={styles.sequenceCell}>
+                          {lab3ExhaustiveSearch.minMaxBest.ranking.join(' > ')} | Max=
+                          {lab3ExhaustiveSearch.minMaxBest.maxDistance}, Σd=
+                          {lab3ExhaustiveSearch.minMaxBest.sumDistance}
+                        </td>
+                        <td className={styles.sequenceCell}>
+                          {distributedSearch.minMaxBest.ranking.join(' > ')} | Max=
+                          {distributedSearch.minMaxBest.maxDistance}, Σd=
+                          {distributedSearch.minMaxBest.sumDistance}
+                        </td>
+                        <td>{minMaxMatchesLab3 ? 'Так' : 'Ні'}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <p className={`${styles.sectionText} ${styles.muted}`}>
+                Порівняння стане доступним після завершення точного перебору в ЛР3 та розподіленого
+                перебору в ЛР4.
+              </p>
+            )}
+          </section>
+        </>
+      ) : (
+        <>
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>Розподілений генетичний алгоритм</h2>
+            <p className={styles.sectionText}>
+              У ЛР4 оцінювання популяції виконується паралельно через Web Workers. Кількість потоків
+              можна обрати вручну: 2, 3 або 4.
+            </p>
+            <div className={styles.controlRow}>
+              <div className={baseStyles.inputGroup}>
+                <label htmlFor='lab4-ga-objective' className={styles.controlLabel}>
+                  Фітнес-функція
+                </label>
+                <select
+                  id='lab4-ga-objective'
+                  value={lab4EvolutionObjective}
+                  onChange={(e) =>
+                    setLab4EvolutionObjective(e.target.value as 'min-sum' | 'min-max')
+                  }
+                  className={styles.select}
+                >
+                  <option value='min-sum'>Мінімальна сума відстаней</option>
+                  <option value='min-max'>MinMax</option>
+                </select>
+              </div>
+              <div className={baseStyles.inputGroup}>
+                <label htmlFor='lab4-ga-threads' className={styles.controlLabel}>
+                  Кількість потоків
+                </label>
+                <select
+                  id='lab4-ga-threads'
+                  value={lab4EvolutionThreadCount}
+                  onChange={(e) =>
+                    setLab4EvolutionThreadCount(Number.parseInt(e.target.value, 10) as 2 | 3 | 4)
+                  }
+                  className={styles.select}
+                >
+                  <option value={2}>2 потоки</option>
+                  <option value={3}>3 потоки</option>
+                  <option value={4}>4 потоки</option>
+                </select>
+              </div>
+              <button
+                type='button'
+                className={baseStyles.button}
+                onClick={runLab4EvolutionSearch}
+                disabled={isLab4EvolutionRunning || lab3Candidates.length === 0}
+              >
+                {isLab4EvolutionRunning ? 'Розрахунок...' : 'Запустити розподілений ГА'}
+              </button>
             </div>
-          </>
-        ) : (
-          <p className={`${styles.sectionText} ${styles.muted}`}>
-            Порівняння стане доступним після завершення точного перебору в ЛР3 та розподіленого
-            перебору в ЛР4.
-          </p>
-        )}
-      </section>
+
+            {lab4EvolutionProgress && (
+              <div className={styles.resultCard}>
+                <p className={styles.sectionText}>
+                  Покоління: {lab4EvolutionProgress.generation} /{' '}
+                  {lab4EvolutionProgress.totalGenerations}
+                </p>
+                <p className={styles.sectionText}>
+                  Поточний час: {lab4EvolutionProgress.durationMs} мс
+                </p>
+                <p className={styles.sectionText}>
+                  Потоки: {lab4EvolutionThreadCount}, популяція:{' '}
+                  {Math.min(Math.max(lab3Candidates.length * 12, 48), 160)}
+                </p>
+              </div>
+            )}
+
+            {lab4EvolutionError && (
+              <p className={`${styles.sectionText} ${styles.muted}`}>{lab4EvolutionError}</p>
+            )}
+
+            {lab4EvolutionResult && (
+              <>
+                <div className={styles.resultCard}>
+                  <p className={styles.sectionText}>
+                    Фітнес-функція:{' '}
+                    {lab4EvolutionResult.objective === 'min-sum'
+                      ? 'Мінімальна сума відстаней'
+                      : 'MinMax'}
+                  </p>
+                  <p className={styles.sectionText}>
+                    Найкраще ранжування: {lab4EvolutionResult.bestRanking.join(' > ')}
+                  </p>
+                  <p className={styles.sectionText}>
+                    Сума відстаней: {lab4EvolutionResult.bestSumDistance}
+                  </p>
+                  <p className={styles.sectionText}>
+                    Максимальна відстань: {lab4EvolutionResult.bestMaxDistance}
+                  </p>
+                  <p className={styles.sectionText}>
+                    Потоків: {lab4EvolutionThreadCount}, поколінь: {lab4EvolutionResult.generations}
+                    , час: {lab4EvolutionResult.durationMs} мс
+                  </p>
+                </div>
+                {lab4EvolutionResult.topRankings.length > 0 &&
+                  renderSolutionTable(
+                    lab4EvolutionResult.objective === 'min-sum'
+                      ? 'Найкращі рішення розподіленого ГА за сумою'
+                      : 'Найкращі рішення розподіленого ГА за критерієм MinMax',
+                    lab4EvolutionResult.topRankings.map((item) => ({
+                      ranking: item.ranking,
+                      sumDistance: item.sumDistance,
+                      maxDistance: item.maxDistance,
+                      distances: []
+                    })),
+                    lab4EvolutionResult.objective
+                  )}
+              </>
+            )}
+          </section>
+
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>Порівняння розподіленого ГА ЛР4 та ГА ЛР3</h2>
+            {lab3EvolutionResult && lab4EvolutionResult ? (
+              geneticComparisonReady ? (
+                <>
+                  <div className={styles.infoGrid}>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Час ГА ЛР3</span>
+                      <span className={styles.infoValue}>{lab3EvolutionResult.durationMs} мс</span>
+                      <span className={styles.infoMeta}>
+                        Централізоване обчислення в одному потоці без Web Workers.
+                      </span>
+                    </article>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Час розподіленого ГА ЛР4</span>
+                      <span className={styles.infoValue}>{lab4EvolutionResult.durationMs} мс</span>
+                      <span className={styles.infoMeta}>
+                        Оцінювання популяції виконується у {lab4EvolutionThreadCount} потоках.
+                      </span>
+                    </article>
+                    <article className={styles.infoCard}>
+                      <span className={styles.infoLabel}>Покращення розв&apos;язку</span>
+                      <span className={styles.infoValue}>
+                        {geneticObjectiveImprovement === null
+                          ? '-'
+                          : geneticObjectiveImprovement > 0
+                            ? `+${geneticObjectiveImprovement}`
+                            : `${geneticObjectiveImprovement}`}
+                      </span>
+                      <span className={styles.infoMeta}>
+                        {lab4EvolutionResult.objective === 'min-sum'
+                          ? 'Додатне значення означає меншу суму відстаней у ЛР4.'
+                          : 'Додатне значення означає менше значення Max у ЛР4.'}
+                      </span>
+                    </article>
+                  </div>
+
+                  <div className={styles.tableWrap}>
+                    <table className={styles.table}>
+                      <thead>
+                        <tr>
+                          <th>Метод</th>
+                          <th>Найкраще ранжування</th>
+                          <th>Σd</th>
+                          <th>Max</th>
+                          <th>Час</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td>ГА ЛР3</td>
+                          <td className={styles.sequenceCell}>
+                            {lab3EvolutionResult.bestRanking.join(' > ')}
+                          </td>
+                          <td>{lab3EvolutionResult.bestSumDistance}</td>
+                          <td>{lab3EvolutionResult.bestMaxDistance}</td>
+                          <td>{lab3EvolutionResult.durationMs} мс</td>
+                        </tr>
+                        <tr>
+                          <td>Розподілений ГА ЛР4</td>
+                          <td className={styles.sequenceCell}>
+                            {lab4EvolutionResult.bestRanking.join(' > ')}
+                          </td>
+                          <td>{lab4EvolutionResult.bestSumDistance}</td>
+                          <td>{lab4EvolutionResult.bestMaxDistance}</td>
+                          <td>{lab4EvolutionResult.durationMs} мс</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className={styles.noteCard}>
+                    <p className={styles.sectionText}>
+                      Висновок: розподілений генетичний алгоритм ЛР4{' '}
+                      {geneticObjectiveImprovement !== null && geneticObjectiveImprovement > 0
+                        ? 'знайшов кращий розв’язок'
+                        : geneticObjectiveImprovement === 0
+                          ? 'дав такий самий за якістю розв’язок'
+                          : 'поки не перевершив централізований ГА ЛР3'}{' '}
+                      і{' '}
+                      {geneticTimeImprovement !== null && geneticTimeImprovement > 0
+                        ? `виконався швидше на ${geneticTimeImprovement} мс.`
+                        : geneticTimeImprovement === 0
+                          ? 'показав той самий час виконання.'
+                          : geneticTimeImprovement !== null
+                            ? `виконався повільніше на ${Math.abs(geneticTimeImprovement)} мс.`
+                            : 'має недоступне порівняння часу.'}
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <p className={`${styles.sectionText} ${styles.muted}`}>
+                  Для коректного порівняння запусти ГА в ЛР3 і ЛР4 з однаковою фітнес-функцією.
+                </p>
+              )
+            ) : (
+              <p className={`${styles.sectionText} ${styles.muted}`}>
+                Спочатку потрібно отримати результат ГА в ЛР3 та запустити розподілений ГА в ЛР4.
+              </p>
+            )}
+          </section>
+        </>
+      )}
     </>
   );
 }
