@@ -9,6 +9,12 @@ type ExpertRankingRow = {
   ranking: string[];
 };
 
+type Lab3CandidateRow = {
+  rank: number;
+  movie: string;
+  isSelected: boolean;
+};
+
 type ExhaustiveRankingResult = {
   ranking: string[];
   distances: number[];
@@ -100,6 +106,9 @@ type WorkerErrorMessage = {
 type WorkerMessage = WorkerProgressMessage | WorkerDoneMessage | WorkerErrorMessage;
 
 type Lab4SectionProps = {
+  lab3CandidateRows: Lab3CandidateRow[];
+  lab3ObjectCount: number;
+  onLab3ObjectCountChange: (value: number) => void;
   lab3Candidates: string[];
   lab3ExpertRankings: ExpertRankingRow[];
   lab3ExhaustiveSearch: {
@@ -119,6 +128,10 @@ type Lab4SectionProps = {
   lab3ExpertCount: number;
   onLab3ExpertCountChange: (value: number) => void;
   onRegenerateLab3ExpertRankings: () => void;
+  lab3FitnessMode: 'min-sum' | 'min-max';
+  onLab3FitnessModeChange: (value: 'min-sum' | 'min-max') => void;
+  runLab3EvolutionSearch: () => void;
+  isLab3EvolutionRunning: boolean;
   formatRankingOrderNumbers: (ranking: string[], candidates: string[]) => string;
 };
 
@@ -185,17 +198,6 @@ const appendUniqueSolution = (
   return [...collection, candidate];
 };
 
-const randomPermutation = (items: string[]) => {
-  const result = [...items];
-
-  for (let index = result.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
-  }
-
-  return result;
-};
-
 const compareObjectiveScores = (
   left: EvolutionRankingScore,
   right: EvolutionRankingScore,
@@ -216,141 +218,6 @@ const compareObjectiveScores = (
   );
 };
 
-const tournamentSelectEvolution = (
-  population: EvolutionRankingScore[],
-  tournamentSize: number,
-  objective: 'min-sum' | 'min-max'
-) => {
-  let best = population[Math.floor(Math.random() * population.length)];
-
-  for (let index = 1; index < tournamentSize; index += 1) {
-    const candidate = population[Math.floor(Math.random() * population.length)];
-    if (compareObjectiveScores(candidate, best, objective) < 0) {
-      best = candidate;
-    }
-  }
-
-  return best;
-};
-
-const mutateChromosome = (chromosome: string[]) => {
-  if (chromosome.length < 2) {
-    return chromosome;
-  }
-
-  const mutated = [...chromosome];
-  const leftIndex = Math.floor(Math.random() * mutated.length);
-  let rightIndex = Math.floor(Math.random() * mutated.length);
-
-  if (rightIndex === leftIndex) {
-    rightIndex = (rightIndex + 1) % mutated.length;
-  }
-
-  [mutated[leftIndex], mutated[rightIndex]] = [mutated[rightIndex], mutated[leftIndex]];
-  return mutated;
-};
-
-const crossoverChromosomes = (leftParent: string[], rightParent: string[]) => {
-  if (leftParent.length < 2) {
-    return [...leftParent];
-  }
-
-  const start = Math.floor(Math.random() * leftParent.length);
-  const end = start + Math.floor(Math.random() * (leftParent.length - start));
-  const child = new Array<string>(leftParent.length).fill('');
-  const used = new Set<string>();
-
-  for (let index = start; index <= end; index += 1) {
-    child[index] = leftParent[index];
-    used.add(leftParent[index]);
-  }
-
-  let rightIndex = 0;
-
-  for (let childIndex = 0; childIndex < child.length; childIndex += 1) {
-    if (child[childIndex]) {
-      continue;
-    }
-
-    while (used.has(rightParent[rightIndex])) {
-      rightIndex += 1;
-    }
-
-    child[childIndex] = rightParent[rightIndex];
-    used.add(rightParent[rightIndex]);
-    rightIndex += 1;
-  }
-
-  return child;
-};
-
-const createEvolutionPopulation = (
-  candidates: string[],
-  size: number,
-  expertRankings: ExpertRankingRow[]
-) => {
-  const population: string[][] = [];
-  const seen = new Set<string>();
-
-  expertRankings.forEach((row) => {
-    if (population.length >= size) {
-      return;
-    }
-
-    const signature = row.ranking.join('|');
-    if (!seen.has(signature)) {
-      population.push([...row.ranking]);
-      seen.add(signature);
-    }
-  });
-
-  while (population.length < size) {
-    const ranking = randomPermutation(candidates);
-    const signature = ranking.join('|');
-
-    if (!seen.has(signature)) {
-      population.push(ranking);
-      seen.add(signature);
-    }
-  }
-
-  return population;
-};
-
-const evolvePopulationOnce = (
-  evaluatedPopulation: EvolutionRankingScore[],
-  targetSize: number,
-  tournamentSize: number,
-  mutationRate: number,
-  eliteCount: number,
-  objective: 'min-sum' | 'min-max'
-) => {
-  const sorted = [...evaluatedPopulation].sort((left, right) =>
-    compareObjectiveScores(left, right, objective)
-  );
-  const nextPopulation = sorted
-    .slice(0, Math.min(eliteCount, sorted.length))
-    .map((item) => [...item.ranking]);
-
-  while (nextPopulation.length < targetSize) {
-    const leftParent = tournamentSelectEvolution(sorted, tournamentSize, objective);
-    const rightParent = tournamentSelectEvolution(sorted, tournamentSize, objective);
-    let child = crossoverChromosomes(leftParent.ranking, rightParent.ranking);
-
-    if (Math.random() < mutationRate) {
-      child = mutateChromosome(child);
-    }
-
-    if (Math.random() < mutationRate / 2) {
-      child = mutateChromosome(child);
-    }
-
-    nextPopulation.push(child);
-  }
-
-  return nextPopulation;
-};
-
 const filterRankingsByBestObjective = (
   rankings: { ranking: string[]; sumDistance: number; maxDistance: number }[],
   objective: 'min-sum' | 'min-max'
@@ -369,60 +236,10 @@ const filterRankingsByBestObjective = (
   );
 };
 
-const evaluatePopulationWithWorkers = async (
-  population: string[][],
-  expertRankings: ExpertRankingRow[],
-  threadCount: number
-) => {
-  const activeThreadCount = Math.max(1, Math.min(threadCount, population.length));
-  const chunkSize = Math.ceil(population.length / activeThreadCount);
-
-  const chunks = Array.from({ length: activeThreadCount }, (_, index) =>
-    population.slice(index * chunkSize, (index + 1) * chunkSize)
-  ).filter((chunk) => chunk.length > 0);
-
-  const workerPromises = chunks.map(
-    (chunk, index) =>
-      new Promise<EvolutionRankingScore[]>((resolve, reject) => {
-        const worker = new Worker(new URL('./geneticEvaluation.worker.ts', import.meta.url), {
-          type: 'module'
-        });
-
-        worker.onmessage = (
-          event: MessageEvent<{
-            type: 'done' | 'error';
-            scores?: EvolutionRankingScore[];
-            error?: string;
-          }>
-        ) => {
-          const message = event.data;
-          worker.terminate();
-
-          if (message.type === 'done' && message.scores) {
-            resolve(message.scores);
-            return;
-          }
-
-          reject(new Error(message.error ?? `Помилка у worker оцінювання ${index + 1}.`));
-        };
-
-        worker.onerror = () => {
-          worker.terminate();
-          reject(new Error(`Помилка у worker оцінювання ${index + 1}.`));
-        };
-
-        worker.postMessage({
-          population: chunk,
-          expertRankings
-        });
-      })
-  );
-
-  const evaluatedChunks = await Promise.all(workerPromises);
-  return evaluatedChunks.flat();
-};
-
 export function Lab4Section({
+  lab3CandidateRows,
+  lab3ObjectCount,
+  onLab3ObjectCountChange,
   lab3Candidates,
   lab3ExpertRankings,
   lab3ExhaustiveSearch,
@@ -430,6 +247,10 @@ export function Lab4Section({
   lab3ExpertCount,
   onLab3ExpertCountChange,
   onRegenerateLab3ExpertRankings,
+  lab3FitnessMode,
+  onLab3FitnessModeChange,
+  runLab3EvolutionSearch,
+  isLab3EvolutionRunning,
   formatRankingOrderNumbers
 }: Lab4SectionProps) {
   const [activeLab4Method, setActiveLab4Method] = useState<Lab4Method>('distributed-search');
@@ -442,7 +263,7 @@ export function Lab4Section({
   const [lab4EvolutionObjective, setLab4EvolutionObjective] = useState<'min-sum' | 'min-max'>(
     'min-sum'
   );
-  const [lab4EvolutionThreadCount, setLab4EvolutionThreadCount] = useState<2 | 3 | 4>(2);
+  const [lab4EvolutionThreadCount, setLab4EvolutionThreadCount] = useState<2 | 3 | 4>(4);
   const [lab4EvolutionResult, setLab4EvolutionResult] = useState<Lab3EvolutionResult | null>(null);
   const [lab4EvolutionProgress, setLab4EvolutionProgress] = useState<Lab4EvolutionProgress | null>(
     null
@@ -803,79 +624,146 @@ export function Lab4Section({
 
     const startedAt = performance.now();
     const populationSize = Math.min(Math.max(lab3Candidates.length * 12, 48), 160);
+    const activeThreadCount = Math.max(1, Math.min(lab4EvolutionThreadCount, populationSize));
+    const islandPopulationSize = Math.max(8, Math.ceil(populationSize / activeThreadCount));
     const generations = 40;
     const tournamentSize = 4;
     const mutationRate = 0.35;
     const eliteCount = 4;
 
     try {
-      let population = createEvolutionPopulation(
-        lab3Candidates,
-        populationSize,
-        lab3ExpertRankings
-      );
-      let evaluated = await evaluatePopulationWithWorkers(
-        population,
-        lab3ExpertRankings,
-        lab4EvolutionThreadCount
-      );
-      let best = evaluated[0];
-      let globalTop: { ranking: string[]; sumDistance: number; maxDistance: number }[] = [];
+      const islandResults = await new Promise<
+        {
+          best: EvolutionRankingScore;
+          topRankings: EvolutionRankingScore[];
+          durationMs: number;
+        }[]
+      >((resolve, reject) => {
+        const workers: Worker[] = [];
+        const progressByWorker = new Map<number, number>();
+        const results: {
+          best: EvolutionRankingScore;
+          topRankings: EvolutionRankingScore[];
+          durationMs: number;
+        }[] = [];
+        let completedWorkers = 0;
+        let failed = false;
 
-      for (let generation = 1; generation <= generations; generation += 1) {
-        for (let index = 1; index < evaluated.length; index += 1) {
-          if (compareObjectiveScores(evaluated[index], best, lab4EvolutionObjective) < 0) {
-            best = evaluated[index];
-          }
+        const stopWorkers = () => {
+          workers.forEach((worker) => worker.terminate());
+        };
+
+        for (let index = 0; index < activeThreadCount; index += 1) {
+          const workerId = index + 1;
+          progressByWorker.set(workerId, 0);
+
+          const worker = new Worker(new URL('./geneticEvaluation.worker.ts', import.meta.url), {
+            type: 'module'
+          });
+          workers.push(worker);
+
+          worker.onmessage = (
+            event: MessageEvent<
+              | {
+                  type: 'progress';
+                  workerId: number;
+                  generation: number;
+                  durationMs: number;
+                }
+              | {
+                  type: 'done';
+                  workerId: number;
+                  result: {
+                    best: EvolutionRankingScore;
+                    topRankings: EvolutionRankingScore[];
+                    durationMs: number;
+                  };
+                }
+              | {
+                  type: 'error';
+                  error: string;
+                }
+            >
+          ) => {
+            const message = event.data;
+
+            if (failed) {
+              return;
+            }
+
+            if (message.type === 'progress') {
+              progressByWorker.set(message.workerId, message.generation);
+              setLab4EvolutionProgress({
+                generation: Math.min(...progressByWorker.values()),
+                totalGenerations: generations,
+                durationMs: Math.round(performance.now() - startedAt)
+              });
+              return;
+            }
+
+            if (message.type === 'done') {
+              progressByWorker.set(message.workerId, generations);
+              results.push(message.result);
+              completedWorkers += 1;
+              worker.terminate();
+
+              setLab4EvolutionProgress({
+                generation: Math.min(...progressByWorker.values()),
+                totalGenerations: generations,
+                durationMs: Math.round(performance.now() - startedAt)
+              });
+
+              if (completedWorkers === activeThreadCount) {
+                resolve(results);
+              }
+              return;
+            }
+
+            failed = true;
+            stopWorkers();
+            reject(new Error(message.error));
+          };
+
+          worker.onerror = () => {
+            if (failed) {
+              return;
+            }
+
+            failed = true;
+            stopWorkers();
+            reject(new Error(`Помилка у genetic worker ${workerId}.`));
+          };
+
+          worker.postMessage({
+            workerId,
+            candidates: lab3Candidates,
+            expertRankings: lab3ExpertRankings,
+            populationSize: islandPopulationSize,
+            generations,
+            tournamentSize,
+            mutationRate,
+            eliteCount,
+            objective: lab4EvolutionObjective
+          });
         }
+      });
 
-        const currentTop = [...evaluated]
-          .sort((left, right) => compareObjectiveScores(left, right, lab4EvolutionObjective))
-          .slice(0, 40)
-          .map((item) => ({
-            ranking: item.ranking,
-            sumDistance: item.sumDistance,
-            maxDistance: item.maxDistance
-          }));
-
-        globalTop = [...globalTop, ...currentTop]
-          .sort((left, right) => compareObjectiveScores(left, right, lab4EvolutionObjective))
-          .filter(
-            (item, index, collection) =>
-              collection.findIndex((row) => row.ranking.join('|') === item.ranking.join('|')) ===
-              index
-          )
-          .slice(0, 40);
-
-        const sortedEvaluated = [...evaluated].sort((left, right) =>
-          compareObjectiveScores(left, right, lab4EvolutionObjective)
-        );
-
-        population = evolvePopulationOnce(
-          sortedEvaluated,
-          populationSize,
-          tournamentSize,
-          mutationRate,
-          eliteCount,
-          lab4EvolutionObjective
-        );
-
-        evaluated = await evaluatePopulationWithWorkers(
-          population,
-          lab3ExpertRankings,
-          lab4EvolutionThreadCount
-        );
-
-        setLab4EvolutionProgress({
-          generation,
-          totalGenerations: generations,
-          durationMs: Math.round(performance.now() - startedAt)
-        });
-      }
+      const best = islandResults
+        .map((result) => result.best)
+        .sort((left, right) => compareObjectiveScores(left, right, lab4EvolutionObjective))[0];
+      const globalTop = islandResults
+        .flatMap((result) => result.topRankings)
+        .sort((left, right) => compareObjectiveScores(left, right, lab4EvolutionObjective))
+        .filter(
+          (item, index, collection) =>
+            collection.findIndex((row) => row.ranking.join('|') === item.ranking.join('|')) ===
+            index
+        )
+        .slice(0, 40);
 
       setLab4EvolutionResult({
         objective: lab4EvolutionObjective,
-        populationSize,
+        populationSize: islandPopulationSize * activeThreadCount,
         generations,
         bestRanking: best.ranking,
         bestSumDistance: best.sumDistance,
@@ -933,6 +821,59 @@ export function Lab4Section({
 
   return (
     <>
+      <section className={styles.section}>
+        <div className={styles.sectionHeaderInline}>
+          <div>
+            <h2 className={styles.sectionTitle}>Лабораторна 4 - вибір об&apos;єктів</h2>
+            <p className={styles.sectionText}>
+              Для ЛР4 використовується та сама топ-N множина об&apos;єктів із рейтингу ЛР1 без
+              урахування балів.
+            </p>
+          </div>
+          <div className={styles.expertControls}>
+            <div className={styles.expertCountControl}>
+              <label htmlFor='lab4-object-count' className={styles.controlLabel}>
+                Кількість об&apos;єктів
+              </label>
+              <input
+                id='lab4-object-count'
+                type='number'
+                min={1}
+                max={20}
+                value={lab3ObjectCount}
+                onChange={(e) =>
+                  onLab3ObjectCountChange(
+                    Math.min(20, Math.max(1, Number.parseInt(e.target.value || '1', 10) || 1))
+                  )
+                }
+                className={baseStyles.input}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Місце</th>
+                <th>Об&apos;єкт</th>
+                <th>Статус</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lab3CandidateRows.map((row) => (
+                <tr key={`lab4-candidate-${row.movie}`}>
+                  <td>{row.rank}</td>
+                  <td>{row.movie}</td>
+                  <td>{row.isSelected ? 'Використовується' : 'Не використовується'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className={styles.section}>
         <div className={styles.sectionHeaderInline}>
           <div>
@@ -1364,10 +1305,87 @@ export function Lab4Section({
       ) : (
         <>
           <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>Генетичний алгоритм ЛР3</h2>
+            <p className={styles.sectionText}>
+              Пошук виконується генетичним алгоритмом з турнірним відбором, кросовером, мутацією.
+              Цей блок повторює централізований ГА з ЛР3 для подальшого порівняння з розподіленим
+              ГА ЛР4.
+            </p>
+            <div className={styles.controlRow}>
+              <div className={baseStyles.inputGroup}>
+                <label htmlFor='lab4-lab3-fitness' className={styles.controlLabel}>
+                  Фітнес-функція
+                </label>
+                <select
+                  id='lab4-lab3-fitness'
+                  value={lab3FitnessMode}
+                  onChange={(e) => onLab3FitnessModeChange(e.target.value as 'min-sum' | 'min-max')}
+                  className={styles.select}
+                >
+                  <option value='min-sum'>Мінімальна сума відстаней</option>
+                  <option value='min-max'>MinMax</option>
+                </select>
+              </div>
+              <button
+                type='button'
+                className={baseStyles.button}
+                onClick={runLab3EvolutionSearch}
+                disabled={isLab3EvolutionRunning || lab3Candidates.length === 0}
+              >
+                {isLab3EvolutionRunning ? 'Розрахунок...' : 'Запустити генетичний алгоритм ЛР3'}
+              </button>
+            </div>
+            {lab3Candidates.length === 0 && (
+              <p className={`${styles.sectionText} ${styles.muted}`}>
+                Для запуску потрібно вибрати хоча б 1 об&apos;єкт. Зараз вибрано:{' '}
+                {lab3Candidates.length}.
+              </p>
+            )}
+            {lab3EvolutionResult && (
+              <>
+                <div className={styles.resultCard}>
+                  <p className={styles.sectionText}>
+                    Фітнес-функція:{' '}
+                    {lab3EvolutionResult.objective === 'min-sum'
+                      ? 'Мінімальна сума відстаней'
+                      : 'MinMax'}
+                  </p>
+                  <p className={styles.sectionText}>
+                    Найкраще ранжування: {lab3EvolutionResult.bestRanking.join(' > ')}
+                  </p>
+                  <p className={styles.sectionText}>
+                    Сума відстаней: {lab3EvolutionResult.bestSumDistance}
+                  </p>
+                  <p className={styles.sectionText}>
+                    Максимальна відстань: {lab3EvolutionResult.bestMaxDistance}
+                  </p>
+                  <p className={styles.sectionText}>
+                    Популяція: {lab3EvolutionResult.populationSize}, поколінь:{' '}
+                    {lab3EvolutionResult.generations}, час: {lab3EvolutionResult.durationMs} мс
+                  </p>
+                </div>
+                {lab3EvolutionResult.topRankings.length > 0 &&
+                  renderSolutionTable(
+                    lab3EvolutionResult.objective === 'min-sum'
+                      ? 'Рішення ЛР3 з мінімальною сумою відстаней'
+                      : 'Рішення ЛР3 з мінімальним значенням Max',
+                    lab3EvolutionResult.topRankings.map((item) => ({
+                      ranking: item.ranking,
+                      sumDistance: item.sumDistance,
+                      maxDistance: item.maxDistance,
+                      distances: []
+                    })),
+                    lab3EvolutionResult.objective
+                  )}
+              </>
+            )}
+          </section>
+
+          <section className={styles.section}>
             <h2 className={styles.sectionTitle}>Розподілений генетичний алгоритм</h2>
             <p className={styles.sectionText}>
-              У ЛР4 оцінювання популяції виконується паралельно через Web Workers. Кількість потоків
-              можна обрати вручну: 2, 3 або 4.
+              У ЛР4 кожен Web Worker виконує повний незалежний генетичний алгоритм на своїй
+              підпопуляції. Кількість потоків можна обрати вручну: 2, 3 або 4.
             </p>
             <div className={styles.controlRow}>
               <div className={baseStyles.inputGroup}>
@@ -1424,7 +1442,13 @@ export function Lab4Section({
                 </p>
                 <p className={styles.sectionText}>
                   Потоки: {lab4EvolutionThreadCount}, популяція:{' '}
-                  {Math.min(Math.max(lab3Candidates.length * 12, 48), 160)}
+                  {Math.max(
+                    8,
+                    Math.ceil(
+                      Math.min(Math.max(lab3Candidates.length * 12, 48), 160) /
+                        lab4EvolutionThreadCount
+                    )
+                  ) * lab4EvolutionThreadCount}
                 </p>
               </div>
             )}
@@ -1490,7 +1514,7 @@ export function Lab4Section({
                       <span className={styles.infoLabel}>Час розподіленого ГА ЛР4</span>
                       <span className={styles.infoValue}>{lab4EvolutionResult.durationMs} мс</span>
                       <span className={styles.infoMeta}>
-                        Оцінювання популяції виконується у {lab4EvolutionThreadCount} потоках.
+                        Кожен із {lab4EvolutionThreadCount} потоків виконує власний незалежний ГА.
                       </span>
                     </article>
                     <article className={styles.infoCard}>

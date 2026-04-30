@@ -859,7 +859,7 @@ export default function Admin() {
         return candidateIndex >= 0 ? candidateIndex + 1 : 0;
       })
     }));
-  }, [lab3CandidatesSignature, lab3ExpertRankingsSignature]);
+  }, [lab3Candidates, lab3ExpertRankings]);
 
   const lab3ExpertHeaders = useMemo(
     () => lab3MatrixRows[0]?.expertValues.map((_, index) => index + 1) ?? [],
@@ -987,7 +987,7 @@ export default function Admin() {
         activeLab3ExhaustiveSearchSignatureRef.current = null;
       }
     };
-  }, [lab3ExhaustiveSearchInputSignature]);
+  }, [lab3Candidates, lab3ExpertRankings, lab3ExhaustiveSearchInputSignature]);
 
   const runEvolutionSearch = async () => {
     if (lab2FinalCandidates.length === 0) {
@@ -1359,6 +1359,9 @@ export default function Admin() {
           />
         ) : activeLab === 'lab4' ? (
           <Lab4Section
+            lab3CandidateRows={lab3CandidateRows}
+            lab3ObjectCount={lab3ObjectCount}
+            onLab3ObjectCountChange={handleLab3ObjectCountChange}
             lab3Candidates={lab3Candidates}
             lab3ExpertRankings={lab3ExpertRankings}
             lab3ExhaustiveSearch={lab3ExhaustiveSearch}
@@ -1366,6 +1369,10 @@ export default function Admin() {
             lab3ExpertCount={lab3ExpertCount}
             onLab3ExpertCountChange={handleLab3ExpertCountChange}
             onRegenerateLab3ExpertRankings={regenerateLab3ExpertRankings}
+            lab3FitnessMode={lab3FitnessMode}
+            onLab3FitnessModeChange={setLab3FitnessMode}
+            runLab3EvolutionSearch={runLab3EvolutionSearch}
+            isLab3EvolutionRunning={isLab3EvolutionRunning}
             formatRankingOrderNumbers={formatRankingOrderNumbers}
           />
         ) : null}
