@@ -173,6 +173,26 @@ const generateRandomExpertRankings = (candidates: string[], count: number): Expe
 const calculateHammingDistanceFull = (ranking: string[], expertRanking: string[]) =>
   ranking.reduce((total, movie, index) => total + (expertRanking[index] === movie ? 0 : 1), 0);
 
+const getRankingOrderNumbers = (ranking: string[], candidates: string[]) =>
+  ranking.map((candidate) => candidates.indexOf(candidate) + 1);
+
+const getRanksByCandidateOrder = (ranking: string[], candidates: string[]) =>
+  candidates.map((candidate) => ranking.indexOf(candidate) + 1);
+
+const calculateOrderDistance = (
+  ranking: string[],
+  expertRanking: string[],
+  candidates: string[]
+) => {
+  const rankingOrder = getRankingOrderNumbers(ranking, candidates);
+  const expertRanks = getRanksByCandidateOrder(expertRanking, candidates);
+
+  return rankingOrder.reduce(
+    (distance, value, index) => distance + Math.abs(value - (expertRanks[index] ?? 0)),
+    0
+  );
+};
+
 const delayToMainThread = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 const computeLab3ExhaustiveSearchAsync = async (
@@ -200,7 +220,7 @@ const computeLab3ExhaustiveSearchAsync = async (
   const evaluateCurrentRanking = () => {
     const ranking = [...currentRanking];
     const distances = expertRankings.map((expertRow) =>
-      calculateHammingDistanceFull(ranking, expertRow.ranking)
+      calculateOrderDistance(ranking, expertRow.ranking, candidates)
     );
     const sumDistance = distances.reduce((total, value) => total + value, 0);
     const maxDistance = Math.max(...distances);
@@ -1150,7 +1170,7 @@ export default function Admin() {
                 setTimeout(() => {
                   const evaluated = chunk.map((ranking) => {
                     const distances = lab3ExpertRankings.map((expertRow) =>
-                      calculateHammingDistanceFull(ranking, expertRow.ranking)
+                      calculateOrderDistance(ranking, expertRow.ranking, lab3Candidates)
                     );
 
                     return {

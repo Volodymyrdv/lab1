@@ -26,15 +26,33 @@ type WorkerRequest = {
 const compareRankingsAlphabetically = (left: string[], right: string[]) =>
   left.join('|').localeCompare(right.join('|'));
 
-const calculateHammingDistanceFull = (ranking: string[], expertRanking: string[]) =>
-  ranking.reduce((total, movie, index) => total + (expertRanking[index] === movie ? 0 : 1), 0);
+const getRankingOrderNumbers = (ranking: string[], candidates: string[]) =>
+  ranking.map((candidate) => candidates.indexOf(candidate) + 1);
+
+const getRanksByCandidateOrder = (ranking: string[], candidates: string[]) =>
+  candidates.map((candidate) => ranking.indexOf(candidate) + 1);
+
+const calculateOrderDistance = (
+  ranking: string[],
+  expertRanking: string[],
+  candidates: string[]
+) => {
+  const rankingOrder = getRankingOrderNumbers(ranking, candidates);
+  const expertRanks = getRanksByCandidateOrder(expertRanking, candidates);
+
+  return rankingOrder.reduce(
+    (distance, value, index) => distance + Math.abs(value - (expertRanks[index] ?? 0)),
+    0
+  );
+};
 
 const evaluateRanking = (
   ranking: string[],
+  candidates: string[],
   expertRankings: ExpertRankingRow[]
 ): EvolutionRankingScore => {
   const distances = expertRankings.map((expertRow) =>
-    calculateHammingDistanceFull(ranking, expertRow.ranking)
+    calculateOrderDistance(ranking, expertRow.ranking, candidates)
   );
 
   return {
@@ -243,7 +261,9 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
     let topRankings: EvolutionRankingScore[] = [];
 
     for (let generation = 1; generation <= generations; generation += 1) {
-      const evaluated = population.map((ranking) => evaluateRanking(ranking, expertRankings));
+      const evaluated = population.map((ranking) =>
+        evaluateRanking(ranking, candidates, expertRankings)
+      );
       const sorted = [...evaluated].sort((left, right) =>
         compareObjectiveScores(left, right, objective)
       );

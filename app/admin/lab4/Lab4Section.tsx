@@ -158,18 +158,21 @@ const compareMinMaxResults = (left: ExhaustiveRankingResult, right: ExhaustiveRa
   left.sumDistance - right.sumDistance ||
   compareRankingsAlphabetically(left.ranking, right.ranking);
 
-const calculateRankDistance = (ranking: string[], expertRanking: string[]) => {
-  const rankByCandidate = new Map(ranking.map((candidate, index) => [candidate, index + 1]));
+const getRankingOrderNumbers = (ranking: string[], candidates: string[]) =>
+  ranking.map((candidate) => candidates.indexOf(candidate) + 1);
 
-  return expertRanking.reduce((distance, candidate, expertIndex) => {
-    const compromiseRank = rankByCandidate.get(candidate);
+const calculateOrderDistance = (
+  ranking: string[],
+  expertRanking: string[],
+  candidates: string[]
+) => {
+  const rankingOrder = getRankingOrderNumbers(ranking, candidates);
+  const expertRanks = getRanksByCandidateOrder(expertRanking, candidates);
 
-    if (!compromiseRank) {
-      return distance;
-    }
-
-    return distance + Math.abs(expertIndex + 1 - compromiseRank);
-  }, 0);
+  return rankingOrder.reduce(
+    (distance, value, index) => distance + Math.abs(value - (expertRanks[index] ?? 0)),
+    0
+  );
 };
 
 const getRanksByCandidateOrder = (ranking: string[], candidates: string[]) =>
@@ -567,13 +570,15 @@ export function Lab4Section({
     }
 
     return lab3ExpertRankings.map((expertRow) => {
-      const minSumDistance = calculateRankDistance(
+      const minSumDistance = calculateOrderDistance(
         distributedSearch.minSumBest.ranking,
-        expertRow.ranking
+        expertRow.ranking,
+        lab3Candidates
       );
-      const minMaxDistance = calculateRankDistance(
+      const minMaxDistance = calculateOrderDistance(
         distributedSearch.minMaxBest.ranking,
-        expertRow.ranking
+        expertRow.ranking,
+        lab3Candidates
       );
 
       return {
@@ -1169,7 +1174,7 @@ export function Lab4Section({
                     </h3>
                     <p className={styles.sectionText}>
                       Індекс рахується за формулою S = (1 - d / ((n³ - n) / 3)) * 100%, де d -
-                      сума модулів різниць рангів експерта і компромісного ранжування.
+                      сума модулів різниць між порядком компромісного ранжування і Rᵢ експерта.
                     </p>
                     <div className={styles.tableWrap}>
                       <table className={styles.table}>
